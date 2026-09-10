@@ -127,6 +127,10 @@ Names are global identifiers — two connections cannot share one, even across d
 pub struct AppModule;
 ```
 
+## Shutdown
+
+`RedisModule` registers no shutdown hook. The `ConnectionManager` closes by being dropped, along with the last clone of it held anywhere in the application. Nothing waits for a command in flight.
+
 ## Health checks
 
 Enable the `health` feature to have `for_root` also register a `RedisHealthIndicator`, which exposes `ping_check(key)` for use with `toni-terminus`. The indicator shares the registered connection — enabling `health` opens no second client — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
@@ -141,7 +145,7 @@ RedisModule::for_root_named(name: impl Into<String>, url: impl Into<String>) -> 
 ```
 
 The returned `CheckedModule`:
-- is named `"RedisModule"`
+- has identity base `RedisModule`, fingerprinted by the connection URL; the rendered key is `RedisModule#<16 hex digits>`, which is what startup errors print and what `get_module_by_id` accepts
 - provides `redis::aio::ConnectionManager` — by type for `for_root`, under the `name` token for `for_root_named`
 - exports `ConnectionManager`
 - is **global** (no need to import into feature modules)

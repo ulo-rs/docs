@@ -35,58 +35,31 @@ PORT=8080
 
 ## Graceful shutdown
 
-Toni installs **no** signal handlers. Wire SIGTERM/SIGINT to the application's `ShutdownHandle` yourself — spawn a task that waits for the signal and calls `shutdown()`:
+Toni installs **no** signal handlers. A container runtime or systemd stops a process by sending SIGTERM and waiting; with nothing listening for it, the process is killed with requests in flight and the shutdown hooks never run.
+
+Wire it by taking a `ShutdownHandle` after `bind()` and calling `shutdown()` from a task that waits on the signal:
 
 ```rust
-use toni::*;
-use toni_axum::AxumAdapter;
+use tokio::signal::unix::{signal, SignalKind};
 
-/// Returns the signal name so it can be forwarded to lifecycle hooks.
-async fn shutdown_signal() -> String {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
+app.bind().await?;
 
-        let mut sigterm = signal(SignalKind::terminate()).expect("failed to listen for SIGTERM");
-        let mut sigint = signal(SignalKind::interrupt()).expect("failed to listen for SIGINT");
+let shutdown = app.shutdown_handle();
+tokio::spawn(async move {
+    let mut sigterm = signal(SignalKind::terminate()).expect("failed to listen for SIGTERM");
+    sigterm.recv().await;
+    tracing::info!("SIGTERM received, shutting down");
+    shutdown.shutdown();
+});
 
-        tokio::select! {
-            _ = sigterm.recv() => "SIGTERM".to_string(),
-            _ = sigint.recv() => "SIGINT".to_string(),
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to listen for Ctrl+C");
-        "SIGINT".to_string()
-    }
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
-    app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
-
-    app.bind().await?;
-
-    let shutdown = app.shutdown_handle();
-    tokio::spawn(async move {
-        let signal = shutdown_signal().await;
-        tracing::info!(%signal, "shutting down");
-        shutdown.shutdown();
-    });
-
-    app.run().await;
-    Ok(())
-}
+app.run().await;
 ```
+
+`shutdown()` takes no argument, and `before_application_shutdown` and `on_application_shutdown` receive `None` for their `signal` parameter on every path — log the signal name where you catch it.
 
 On the shutdown signal, `run()` closes the adapters first so in-flight requests drain, then runs the shutdown hooks in order: `on_module_destroy` → `before_application_shutdown` → `on_application_shutdown`. `ShutdownHandle` is cloneable and `shutdown()` is idempotent, so any task can trigger it.
 
-Without this wiring, SIGTERM kills the process immediately — in-flight requests are dropped and shutdown hooks never run. The full version of this pattern is in [`examples/graceful_shutdown.rs`](https://github.com/ifeanyi-ugwu/toni-rs/blob/master/examples/graceful_shutdown.rs).
+[Graceful shutdown](/docs/techniques/graceful-shutdown) covers the wiring in full — catching SIGINT and Windows Ctrl+C from the same task, and the rest of `ShutdownHandle`. The runnable version is [`examples/graceful_shutdown.rs`](https://github.com/ifeanyi-ugwu/toni-rs/blob/master/examples/graceful_shutdown.rs).
 
 ## Listening on all interfaces
 

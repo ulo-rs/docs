@@ -76,7 +76,7 @@ The injected type depends on the database:
 - `sqlx::Pool<Sqlite>` for SQLite
 
 ```rust
-use sqlx::PgPool; // re-exported from toni_sqlx
+use sqlx::PgPool; // also available as toni_sqlx::PgPool
 
 #[injectable]
 pub struct UsersService {

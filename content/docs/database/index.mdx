@@ -3,7 +3,9 @@ title: Database
 description: Six integrations, each registering a connection handle you inject by type.
 ---
 
-Every integration follows the same shape: call `for_root` once in the root module, then inject the driver's own handle — `DatabaseConnection`, `Pool<Postgres>`, `Database` — wherever it is needed. Toni does not wrap the driver, so the query API is the one the driver's own documentation describes.
+Every integration follows the same shape: call the integration's root constructor once in the root module — `for_root`, or the database-specific constructor for SQLx and Diesel — then inject the driver's own handle: `DatabaseConnection`, `Pool<Postgres>`, `Database`. Toni does not wrap the driver, so the query API is the one the driver's own documentation describes.
+
+A DI token is the handle's fully-qualified type name, not the spelling in your `use` statement. `PgPool`, `Pool<Postgres>` and `sqlx::Pool<sqlx::Postgres>` are one token, so an alias or a qualified path reaches the same connection.
 
 Five of the six run a reachability probe at startup and fail `create` with a redacted error rather than deferring the failure to the first query. Prisma is the exception, and its page says why.
 
@@ -15,3 +17,25 @@ Five of the six run a reachability probe at startup and fail `create` with a red
   <Card title="Redis" href="/docs/database/redis" description="A managed ConnectionManager for caching and shared state." />
   <Card title="Prisma" href="/docs/database/prisma" description="Wrapping a prisma-client-rust client as a provider." />
 </Cards>
+
+## Module or provider
+
+An integration ships a module when something has to own a lifetime the container cannot infer from a constructor expression:
+
+- a connection or pool whose construction takes configuration beyond a URL
+- a startup check, so an unreachable server is refused at `create` rather than at first use
+- a shutdown hook with work to do beyond dropping
+- a health indicator sharing the registered connection
+- registration under a token the framework reserves, so two of them coexist (`for_root_named`)
+
+The database integrations own all five, which is what their root constructors are for.
+
+None of those true and it is a provider. A client dialled lazily is the usual case: one constructor expression, no pool, no startup check by design, and dropping the channel is closing it.
+
+```rust
+providers: [provider_factory!(OrdersClient<Channel>, || {
+    OrdersClient::new(Channel::from_static("http://orders:50051").connect_lazy())
+})]
+```
+
+`provider_factory!` registers the value under its own type and a bare `#[inject]` resolves it, so the container owns when it is built and when it drops. Two of one type live side by side under string tokens, the same way `for_root_named` carries two connections. This is why no RPC or gRPC client ships a module of its own.

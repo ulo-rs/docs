@@ -197,7 +197,9 @@ Run the application and restart it whenever a source file changes.
 toni dev
 ```
 
-Run it from the project root. On start it runs `cargo run`; on every save of a `.rs` or `.toml` file it rebuilds and restarts the process. Paths in `.gitignore` (plus `target/` and `.git/`) are excluded from watching. Ctrl-C stops the watcher and the application.
+Run it from the project root. On start it runs `cargo run`; on every save of a `.rs` or `.toml` file it rebuilds and restarts the process. Changes are throttled at 250ms, so a burst of saves triggers one rebuild. Paths in `.gitignore` (plus `target/` and `.git/`) are excluded from watching. Ctrl-C stops the watcher and the application.
+
+A restart sends SIGTERM and waits two seconds before SIGKILL. A generated app has no signal handlers and exits at once; an app that wires [`shutdown_handle()`](/docs/techniques/graceful-shutdown) gets that window to drain.
 
 ```
 [toni dev] watching /path/to/my_api — running `cargo run` (Ctrl-C to stop)

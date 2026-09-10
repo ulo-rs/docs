@@ -15,7 +15,7 @@ Add the dependency with the appropriate feature for your database:
 [dependencies]
 toni = "0.2"
 toni-diesel = { version = "0.1", features = ["postgres"] }
-diesel = { version = "2", features = ["postgres"] }
+diesel = { version = "2", features = ["postgres_backend"], default-features = false }
 diesel-async = { version = "0.8", features = ["postgres", "deadpool"] }
 ```
 
@@ -50,7 +50,7 @@ The pool itself is constructed lazily, without dialing. What verifies the databa
 
 ## Startup check
 
-By default the module confirms the database answers before the application starts: 3 attempts, 2 seconds apart, each bounded to 5 seconds — worst case ≈ 19 s. Tune the schedule with `with_startup_check`:
+By default the module confirms the database answers before the application starts: 3 attempts, 2 seconds apart. Tune the schedule with `with_startup_check`:
 
 ```rust
 use toni::StartupCheck;
@@ -60,6 +60,8 @@ DieselModule::postgres(url)
 ```
 
 `StartupCheck` builders: `.attempts(u32)`, `.delay(Duration)`, `.timeout(Duration)`.
+
+`.attempts` and `.delay` apply here. `.timeout` does not: deadpool answers a failed create rather than retrying it, so an attempt is bounded by the connection attempt the driver makes, and against a host that drops packets rather than refusing it, one attempt can outlast the whole schedule.
 
 Opt out with `.without_startup_check()` — the application then starts without contacting the database, and failures surface where the pool is first used. Worth taking when a readiness probe already reports the database and the application should stay up while it recovers.
 

@@ -115,6 +115,16 @@ async fn main() {
 
 `POST /graphql` handles queries and mutations. In debug builds, `GET /graphql` serves GraphQL Playground.
 
+## Mounting more than one schema
+
+A `GraphQLModule`'s identity is its full type — query, mutation and subscription roots and the context builder — plus the path, the playground flag and the subscription path. Two imports differing in any of those are two modules, which decides what happens when a graph holds more than one:
+
+- The same schema at two paths mounts two endpoints, each with its own context builder.
+- An identical import reached through two module paths is a diamond: one module, one endpoint.
+- Two modules on one path is a duplicate route, and the adapter's own router is what rejects it: registration panics out of `app.bind()` rather than returning a `StartupError` — axum's message is `Overlapping method route`. Give each endpoint its own path.
+
+Changing only the context builder does not merge two modules onto one path; it makes them distinct, so the third case is what you get.
+
 ## Reading request headers in context
 
 Use `req` in `build` to read HTTP headers — useful for extracting auth tokens:
@@ -139,6 +149,26 @@ impl ContextBuilder for AppContextBuilder {
 }
 ```
 
+## Injecting the service
+
+`GraphQLModule` exports the executor behind the endpoint under the token `"GraphQLService"`. A module that imports the GraphQL module can inject it and run a document without going through HTTP — a scheduled job, or a second protocol in front of the same schema:
+
+```rust
+use toni_async_graphql::{DefaultContextBuilder, GraphQLService};
+
+type AppGraphQL = GraphQLService<QueryRoot, EmptyMutation, EmptySubscription, DefaultContextBuilder>;
+
+#[injectable]
+pub struct ReportJob {
+    #[inject("GraphQLService")]
+    graphql: AppGraphQL,
+}
+```
+
+The registration token is that string, so a bare `#[inject]` by type does not reach the service. Name it, and spell out all four parameters of `GraphQLService<Query, Mutation, Subscription, Ctx>` — an alias keeps that to one place.
+
+`execute` takes the `RequestPart` it hands to your `ContextBuilder`, so a caller outside a request supplies one of its own.
+
 ## Subscriptions
 
 Enable GraphQL subscriptions over the `graphql-transport-ws` protocol by calling `.with_subscription_path()`:
@@ -157,6 +187,8 @@ Clients connect via WebSocket and must negotiate the `graphql-transport-ws` sub-
 ws://localhost:3000/graphql/ws
 Sec-WebSocket-Protocol: graphql-transport-ws
 ```
+
+A connection that does not offer that sub-protocol is refused with close code 4406 — the code `graphql-transport-ws` reserves for an unacceptable sub-protocol — and nothing else is sent. A client that has not agreed on the grammar cannot read an error written in it.
 
 ### Subscription context
 
@@ -260,4 +292,17 @@ trait SubscriptionContextBuilder: Send + Sync + 'static {
 // No-op implementations
 struct DefaultContextBuilder;
 struct DefaultSubscriptionContextBuilder;
+
+// The exported executor, registered and exported under the token "GraphQLService"
+impl GraphQLService<Query, Mutation, Subscription, Ctx> {
+    async fn execute(
+        &self,
+        query: String,
+        operation_name: Option<String>,
+        variables: Option<serde_json::Value>,
+        http_req: &RequestPart,
+    ) -> async_graphql::Response;
+
+    fn schema(&self) -> &async_graphql::Schema<Query, Mutation, Subscription>;
+}
 ```

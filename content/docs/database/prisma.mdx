@@ -131,8 +131,10 @@ pub struct ReportsService {
 }
 ```
 
-<Callout type="warn" title="A second Prisma client of the same type must be named">
-Unlike the other database integrations, Prisma's connect closure is opaque to the framework, so two unnamed `for_root` calls registering the same client type cannot be told apart — a name is **required** to register more than one client of the same type. Names are global identifiers; two connections cannot share one, even across different integration crates.
+<Callout type="warn" title="A second Prisma client must be named">
+The other database integrations fingerprint their module identity with the connection URL, so a second unnamed root constructor pointing somewhere else is refused at startup. Prisma's connect closure is opaque, so there is nothing to fingerprint: both imports carry the identity `PrismaModule`, the second is read as the same module reached through a second import path, and it is dropped. No error, no warning, and its client never registers. Two *different* client types collapse the same way, because the identity carries nothing about the type.
+
+Name every client past the first. Names are global identifiers; two connections cannot share one, even across different integration crates.
 </Callout>
 
 ## Shutdown

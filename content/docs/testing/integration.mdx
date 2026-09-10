@@ -135,6 +135,63 @@ async fn test_create_user() {
 
 Skipping the `shutdown.shutdown()` teardown is fine for pure request/response tests — the server task is dropped with the `LocalSet` — but shutdown-dependent assertions (lifecycle hooks, connection cleanup) need the explicit handle.
 
+## The same suite on every adapter
+
+Adapters are distinct types, so a suite that must hold on all of them takes the adapter as a parameter and is instantiated once per adapter. Make `start_server` generic over `impl HttpAdapter + 'static`, write each case as a plain async fn over the started server, then generate one test per adapter:
+
+```rust
+async fn start_server(
+    module: impl ModuleMetadata + 'static,
+    adapter: impl toni::HttpAdapter + 'static,
+) -> (String, ShutdownHandle) {
+    // as above, with `adapter` in place of `AxumAdapter::new()`
+}
+
+async fn case_lists_users(base_url: String) {
+    let response = reqwest::get(format!("{base_url}/users")).await.unwrap();
+    assert_eq!(response.status(), 200);
+}
+
+macro_rules! suite {
+    ($name:ident, $adapter:expr) => {
+        mod $name {
+            #[tokio::test]
+            async fn lists_users() {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(async {
+                        let (base_url, _shutdown) =
+                            super::start_server(super::TestModule, $adapter).await;
+                        super::case_lists_users(base_url).await;
+                    })
+                    .await;
+            }
+        }
+    };
+}
+
+suite!(axum, toni_axum::AxumAdapter::new());
+suite!(poem, toni_poem::PoemAdapter::new());
+```
+
+This is how the framework's own conformance suite is written: behaviour that must be identical across adapters — the global middleware chain, unrouted paths, method mismatches — is written once and run against every adapter.
+
+## RPC, WebSocket and gRPC servers
+
+The other transports take the same shape: register the adapter on port `0`, `bind()`, and read the address off `BoundAdapters` before calling `run()`.
+
+```rust
+let mut app = ToniFactory::create(TestModule).await.unwrap();
+app.use_rpc_adapter(toni_tcp::TcpAdapter::new("127.0.0.1", 0)).unwrap();
+
+let bound = app.bind().await.unwrap();
+let addr = bound.rpc.expect("RPC adapter not bound");
+```
+
+- `bound.rpc` is the RPC listener's address. It is `None` for a subject-based transport (NATS, Kafka, MQTT) that has no local socket — connect the client to the broker instead.
+- `bound.grpc` is the gRPC listener's address.
+- `bound.websocket` is a `Vec`, one entry per separate-port WebSocket listener. A gateway sharing the HTTP port is reached through `bound.http`.
+
 ## Testing a specific module in isolation
 
 Create a test-only module that provides only what you need:
@@ -182,6 +239,38 @@ async fn failing_init_hook_surfaces_from_create() {
 ```
 
 `on_module_init` failures come back from `create`; `on_application_bootstrap` failures from `bind` — or from `create_application_context`, which runs bootstrap itself. `StartupError` is `#[non_exhaustive]`: match variants with `..` as above, and keep a wildcard arm in any exhaustive `match`.
+
+A socket that cannot be acquired is the other half, and it surfaces from `bind()`:
+
+```rust
+use std::net::TcpListener;
+
+use toni::{StartupError, ToniFactory};
+use toni_tcp::TcpAdapter;
+
+#[tokio::test]
+async fn a_taken_rpc_port_fails_bind() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+            let taken = occupied.local_addr().unwrap().port();
+
+            let mut app = ToniFactory::create(RpcModule).await.unwrap();
+            app.use_rpc_adapter(TcpAdapter::new("127.0.0.1", taken)).unwrap();
+
+            let err = app.bind().await.expect_err("a taken port must fail bind");
+
+            assert!(matches!(
+                err,
+                StartupError::Adapter { transport: "rpc", .. }
+            ));
+        })
+        .await;
+}
+```
+
+`bind()` is refuse-or-none: one transport failing fails the call, the sockets already acquired are released, and the application is left in a terminal state. A test asserting the refusal builds a new application rather than binding that one again.
 
 ## Tip: test isolation
 

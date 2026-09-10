@@ -3,7 +3,7 @@ title: GraphQL Overview
 description: Toni offers two official GraphQL integrations — choose based on your schema style.
 ---
 
-Toni ships with two GraphQL integrations as separate crates. Both integrate fully with the DI system, lifecycle hooks, guards, and interceptors.
+Toni ships with two GraphQL integrations as separate crates. Both register their endpoint through the same module system, DI container and lifecycle hooks as the rest of the application.
 
 ## Choosing an integration
 
@@ -12,22 +12,26 @@ Toni ships with two GraphQL integrations as separate crates. Both integrate full
 | **Library** | [async-graphql](https://github.com/async-graphql/async-graphql) | [Juniper](https://github.com/graphql-rust/juniper) |
 | **Context type** | Type-erased (`Data` container) | Concrete, user-defined struct |
 | **Schema style** | Code-first via macros | Code-first via macros |
+| **Subscriptions** | `graphql-transport-ws` over WebSocket | none |
 | **Best for** | Flexible context, large teams | Type-safe context, smaller teams |
 
 Both support:
-- A single HTTP endpoint at `/graphql` (configurable) — POST for queries and mutations, GET for the playground
-- Built-in GraphQL Playground (disable in production)
-- Guards and interceptors on the GraphQL endpoint
+- An HTTP endpoint at `/graphql` (configurable) — POST for queries and mutations, GET for the playground
+- Built-in GraphQL Playground (disabled in release builds)
 - Injecting Toni services into resolvers via the DI container
 
 ## Common architecture
 
-Both integrations expose a `GraphQLModule` dynamic module that registers:
+Both integrations expose a `GraphQLModule` you import like any other module. It registers:
 - A `GraphQLController` handling `/graphql` (configurable path)
-- A `GraphQLService` for executing queries
+- A `GraphQLService` for executing queries, exported under the token `"GraphQLService"`
 - Context building infrastructure
 
 Your resolvers access services through the GraphQL context, which is populated by a `ContextBuilder` you provide.
+
+## Enhancers on the endpoint
+
+The module owns the controller, so there is no struct of yours to hang `#[use_guards]` or `#[use_interceptors]` on: the GraphQL routes carry no controller- or method-level enhancers. Global HTTP middleware, guards and interceptors registered on `ToniFactory` do run on them, and everything past that belongs in the `ContextBuilder` — it reads the request headers and decides what the resolvers are given.
 
 ## Sections in this chapter
 

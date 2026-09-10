@@ -164,7 +164,7 @@ SeaOrmModule::for_root_named(name: impl Into<String>, url: impl Into<String>) ->
 ```
 
 The returned `CheckedModule`:
-- is named `"SeaOrmModule"`
+- has identity base `SeaOrmModule`, fingerprinted by the connection URL; the rendered key is `SeaOrmModule#<16 hex digits>`, which is what startup errors print and what `get_module_by_id` accepts
 - provides `sea_orm::DatabaseConnection` — by type for `for_root`, under the `name` token for `for_root_named`
 - exports `DatabaseConnection`
 - is **global** (no need to import into feature modules)

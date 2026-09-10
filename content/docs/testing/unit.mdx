@@ -88,7 +88,7 @@ Guards implement `Guard<HttpContext>` (or another context type) with an async `c
 use toni::async_trait;
 use toni::context::HttpContext;
 use toni::traits_helpers::Guard;
-use toni_macros::injectable;
+use toni::injectable;
 
 #[injectable]
 pub struct AuthGuard;

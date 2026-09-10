@@ -5,6 +5,8 @@ description: Use toni-juniper to add a GraphQL endpoint powered by the juniper c
 
 `toni-juniper` integrates Toni with the [Juniper](https://github.com/graphql-rust/juniper) GraphQL library. Unlike `toni-async-graphql`, Juniper uses a concrete, user-defined context type — every resolver receives your context struct directly, giving you full compile-time type safety.
 
+The module mounts one HTTP endpoint: POST for queries and mutations, GET for the playground. It serves no subscriptions — the schema's subscription root is part of the module's type, but nothing carries subscription operations over a WebSocket. [`toni-async-graphql`](/docs/graphql/async-graphql#subscriptions) is the integration that does.
+
 ## Installation
 
 ```toml title="Cargo.toml"
@@ -139,6 +141,41 @@ async fn main() {
 }
 ```
 
+## Mounting more than one schema
+
+A `GraphQLModule`'s identity is its full type — the schema roots, the context builder and the scalar — plus the path and the playground flag. Two imports differing in any of those are two modules, which decides what happens when a graph holds more than one:
+
+- The same schema at two paths mounts two endpoints, each with its own context builder.
+- An identical import reached through two module paths is a diamond: one module, one endpoint.
+- Two modules on one path is a duplicate route, and the adapter's own router is what rejects it: registration panics out of `app.bind()` rather than returning a `StartupError` — axum's message is `Overlapping method route`. Give each endpoint its own path.
+
+Changing only the context builder does not merge two modules onto one path; it makes them distinct, so the third case is what you get.
+
+## Injecting the service
+
+`GraphQLModule` exports the executor behind the endpoint under the token `"GraphQLService"`. A module that imports the GraphQL module can inject it and run a document without going through HTTP:
+
+```rust
+use toni_juniper::GraphQLService;
+
+type AppGraphQL = GraphQLService<
+    QueryRoot,
+    EmptyMutation<AppContext>,
+    EmptySubscription<AppContext>,
+    AppContextBuilder,
+>;
+
+#[injectable]
+pub struct ReportJob {
+    #[inject("GraphQLService")]
+    graphql: AppGraphQL,
+}
+```
+
+The registration token is that string, so a bare `#[inject]` by type does not reach the service. Name it, and spell out the parameters of `GraphQLService<Query, Mutation, Subscription, Ctx>` — an alias keeps that to one place. The trailing scalar parameter defaults to `juniper::DefaultScalarValue`.
+
+`execute(query, operation_name, variables, http_req)` builds the context from the `RequestPart` you hand it and answers a `serde_json::Value` holding `data` and any `errors`.
+
 ## Comparison with async-graphql
 
 |             | `toni-async-graphql`          | `toni-juniper`              |
@@ -146,5 +183,6 @@ async fn main() {
 | Context     | `Data` (type-erased map)      | Concrete struct (your type) |
 | Type safety | Runtime lookup                | Compile-time                |
 | Flexibility | Easier to add more data later | Explicit, all-or-nothing    |
+| Subscriptions | `graphql-transport-ws` over WebSocket | none |
 
 If your team values explicit, compile-checked context and doesn't mind the boilerplate of a concrete context type, Juniper is the stronger choice. If you want to incrementally add services to the context without changing the context type, async-graphql's `Data` container is more flexible.
