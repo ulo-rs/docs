@@ -39,7 +39,7 @@ Inject `RedisBroadcastService` anywhere you need to push messages across process
 use toni_redis_broadcast::RedisBroadcastService;
 use toni::websocket::{WsClient, WsError, WsHandlerOutput, WsMessage};
 use toni::WsHandlerResult;
-use toni_macros::{new, subscriptions, websocket_gateway};
+use toni::{new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway {
@@ -82,6 +82,10 @@ broadcast.to_room(room_name)                // clients in a named room (global v
 broadcast.to_client(client_id)              // a specific client (routed to its process)
 broadcast.except(client_id)                 // all clients except one
 
+// Target refinement
+.and_room(room)                             // add a room (to_room targets): union of members
+.in_namespace(ns)                           // keep only clients in this namespace
+
 // Sending (async, on the target builder)
 .send(WsMessage) -> Result<usize, BroadcastError>    // returns Ok(0) — count unknowable at publish time
 .send_event(event, data) -> Result<usize, BroadcastError>  // JSON: {"event": ..., "data": ...}
@@ -95,7 +99,17 @@ broadcast.get_client_rooms(client_id) -> Vec<String> // async, global view
 
 ## Rooms
 
-Room membership is stored in Redis sets (`toni:rooms:{room}` and `toni:client:{id}:rooms`), so every process sees the same membership state:
+Room membership is stored in Redis sets, so every process sees the same membership state. The keys and channels the module uses, for an operator reading the instance directly:
+
+| Key | Holds |
+|---|---|
+| `toni:rooms:{room}` | the client ids in that room; a client's own id doubles as its auto-room |
+| `toni:client:{id}:rooms` | the rooms one client is in |
+| `toni:client:{id}:process` | which process that client is connected to |
+| `toni:broadcast` | the Pub/Sub channel every process subscribes to — the fan-out path for `to_all`, `to_room` and `except` |
+| `toni:broadcast:{process_id}` | one process's own Pub/Sub channel; `to_client` publishes straight here when the affinity key names the process, skipping the global fan-out |
+
+
 
 ```rust
 #[subscribe_message("join")]

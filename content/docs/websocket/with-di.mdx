@@ -1,6 +1,6 @@
 ---
 title: WebSocket + Dependency Injection
-description: Gateways are full DI participants — inject any service, apply guards and interceptors, use lifecycle hooks.
+description: Gateways are full DI participants — inject any service, wrap them in guards, interceptors and error handlers, use lifecycle hooks.
 ---
 
 WebSocket gateways are providers like any other. They participate fully in the DI system: they can inject services, implement lifecycle hooks, and be guarded and intercepted like HTTP routes — with `WsContext` in place of `HttpContext`.
@@ -12,7 +12,7 @@ Declare dependencies as `#[inject]` fields and take them in the `#[new]` constru
 ```rust
 use toni::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
 use toni::WsHandlerResult;
-use toni_macros::{injectable, module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
+use toni::{injectable, module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
 
 #[injectable]
 pub struct GameService { /* ... */ }
@@ -83,7 +83,7 @@ A WebSocket guard is a plain `#[injectable]` provider implementing `Guard<WsCont
 use toni::async_trait;
 use toni::context::WsContext;
 use toni::traits_helpers::Guard;
-use toni_macros::injectable;
+use toni::injectable;
 
 #[injectable]
 pub struct WsAuthGuard;
@@ -129,7 +129,7 @@ struct ChatModule;
 ```
 
 <Callout type="warn">
-Gateway-level guards run twice: once at **connect** (a rejection refuses the connection) and once per **message** (a rejection drops the message and keeps the connection alive).
+Gateway-level guards run twice: once at **connect** and once per **message**. A rejection at connect refuses the connection — the caller gets the canonical envelope and a close frame, see [Refusing a connection](/docs/websocket/gateways#refusing-a-connection). A rejection on a message answers the sender with the canonical `Forbidden` envelope and leaves the connection open.
 </Callout>
 
 ### Per-handler guards
@@ -144,6 +144,8 @@ async fn on_admin(&self, client: WsClient, msg: WsMessage) -> WsHandlerResult {
 }
 ```
 
+A per-handler guard is keyed by its event, so it never runs at connect — a connection carries no event. Only gateway-level and global guards admit connections.
+
 ### Global WebSocket guards
 
 Register a guard for every gateway on the factory. Global enhancers are per-transport — WebSocket guards never see HTTP traffic:
@@ -156,7 +158,7 @@ factory.use_global_ws_guards(Arc::new(WsAuthGuard));
 let mut app = factory.create_with(ChatModule).await?;
 ```
 
-Globally registered instances are constructed by you (`Arc::new`), so they don't need to appear in `providers`.
+Globally registered instances are constructed by you (`Arc::new`), so they don't need to appear in `providers`. A global guard is prepended to every gateway's list, which means it runs at connect as well as per message.
 
 ## Interceptors on gateways
 
@@ -167,7 +169,7 @@ use toni::async_trait;
 use toni::context::WsContext;
 use toni::traits_helpers::{Interceptor, InterceptorNext};
 use toni::WsHandlerResult;
-use toni_macros::injectable;
+use toni::injectable;
 
 #[injectable]
 pub struct WsLoggingInterceptor;
@@ -224,24 +226,68 @@ impl ChatGateway {
 }
 ```
 
-Pipes (`Pipe<WsContext, WsHandlerResult>`, `#[use_pipes]`) and error handlers (`ErrorHandler<WsContext, WsMessage>`, `#[use_error_handlers]`) follow the same pattern, with matching `use_global_ws_pipes` / `use_global_ws_error_handler` factory methods.
+## Error handlers on gateways
+
+An error handler is the same shape again: `#[injectable]` + `ErrorHandler<WsContext, WsMessage>`. Note the answer type — the chain answers with a bare `WsMessage`, not the `WsHandlerResult` an interceptor returns. Returning `None` observes the error without shaping it and passes it to the next handler in the chain:
+
+```rust
+use toni::async_trait;
+use toni::context::WsContext;
+use toni::traits_helpers::{ChainError, ErrorHandler};
+use toni::websocket::WsMessage;
+use toni::injectable;
+
+#[injectable]
+pub struct WsErrorLogger;
+
+#[async_trait]
+impl ErrorHandler<WsContext, WsMessage> for WsErrorLogger {
+    async fn handle_error(&self, error: ChainError<'_>, ctx: &WsContext) -> Option<WsMessage> {
+        eprintln!("event '{}' failed: {error}", ctx.event());
+        None
+    }
+}
+```
+
+Apply it with `#[use_error_handlers(WsErrorLogger)]` on the `#[subscriptions]` impl or on a single handler, or globally with `factory.use_global_ws_error_handler(Arc::new(WsErrorLogger))`. The chain is the only error seam on this transport: it sees handler errors and the framework's own events alike — see [Framework events](/docs/websocket/gateways#framework-events).
 
 ## WsContext
 
-`WsContext` is the per-message context enhancers receive:
+`WsContext` is the context a guard, interceptor, hook or handler receives. There is one per execution: one per message, one for the connect, and one for the disconnect.
 
 ```rust
 ctx.client()        // &WsClient — id, handshake headers/query, session
 ctx.session()       // &Session — the connection's store, shared by every execution on it
 ctx.message()       // &WsMessage — the inbound frame
-ctx.event()         // &str — the routed event name ("connect" during connection guards)
+ctx.event()         // &str — the routed event name; "connect" and "disconnect" for those two
 ctx.extensions()    // &Extensions — the per-execution bag; a guard inserts, the handler reads
+ctx.metadata()      // Option<&Metadata> — what #[set_metadata] declared for this handler
+ctx.cache()         // &ExecutionCache — one construction per execution, shared by clone
 ctx.cancellation()  // &CancellationToken
+ctx.deadline()      // Option<Instant> — always None here; the transport carries no deadline
 ```
+
+`metadata`, `cache`, `cancellation` and `deadline` come from the `HandlerContext` trait, so `use toni::context::HandlerContext;` has to be in scope to call them.
 
 There is no response slot: a handler answers by returning, and an interceptor that wants a different answer returns a different value.
 
-WebSocket request scope is per **message**, not per connection: gateway guards, interceptors, and any request-scoped providers they depend on are rebuilt for each message (and once for the connect), and `ctx.extensions()` empties with each. State that must survive from one message to the next belongs in `ctx.session()` — see [Session](/docs/websocket/gateways#session).
+WebSocket request scope is per **message**, not per connection: guards, interceptors, and any request-scoped providers they depend on are rebuilt for each message, and `ctx.extensions()` empties with each. State that must survive from one message to the next belongs in `ctx.session()` — see [Session](/docs/websocket/gateways#session).
+
+## What runs on a connect
+
+A connect is an admission decision, not a call. Guards run, because answering admission is a guard's whole contract. Interceptors and error handlers do not: an interceptor wraps a call and its answer, an error handler shapes an answer, and a connection that is never opened has neither.
+
+| | Connect | Message |
+|---|---|---|
+| Global guards | yes | yes |
+| Gateway-level guards — `#[use_guards]` on the `#[subscriptions]` impl | yes | yes |
+| Per-handler guards — `#[use_guards]` on one `#[subscribe_message]` | no | yes, for that event |
+| Interceptors | no | yes |
+| Error handlers | no | yes |
+
+The connect has an execution of its own, whose context and extensions bag the guards share with the `#[on_connect]` hook — so what a guard writes there, the hook reads. It ends with the connect; anything the later messages need goes in the [session](/docs/websocket/gateways#session) instead.
+
+Refusing a connection still answers the caller: the canonical envelope, then a close carrying an RFC 6455 code. See [Refusing a connection](/docs/websocket/gateways#refusing-a-connection).
 
 ## Lifecycle hooks on gateways
 

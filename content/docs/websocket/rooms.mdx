@@ -16,7 +16,7 @@ use toni::websocket::{
     BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage,
 };
 use toni::WsHandlerResult;
-use toni_macros::{module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
+use toni::{module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/rooms")]
 pub struct RoomGateway {
@@ -120,6 +120,8 @@ pub struct RoomsModule;
 
 `join_room` and `.send()` return `Result<_, BroadcastError>`, which converts into `WsError` via `?` inside handlers.
 
+`parse_field` above pulls one field out of the raw frame. A handler that wants the frame as a type takes `Payload<T>` instead — it deserializes the whole frame, so `T` carries the fields the frame carries — and `Validated<Payload<T>>` adds validation on top. See [Handler parameters](/docs/websocket/gateways#handler-parameters).
+
 ## BroadcastService API
 
 ```rust
@@ -140,7 +142,7 @@ broadcast.except(client_id)      // all connected clients except one
 .in_namespace(ns)                // keep only clients in this namespace
 
 // Sending (async, on the builder)
-.send(WsMessage) -> Result<usize, BroadcastError>          // returns count delivered
+.send(WsMessage) -> Result<usize, BroadcastError>          // how many write channels accepted it
 .send_event(event, data) -> Result<usize, BroadcastError>  // JSON: {"event": ..., "data": ...}
 ```
 
@@ -213,7 +215,7 @@ async fn handle_typing(&self, client: WsClient, message: WsMessage) -> WsHandler
 
 ```rust
 use toni::websocket::{BroadcastService, WsMessage};
-use toni_macros::{injectable, new};
+use toni::{injectable, new};
 
 #[injectable]
 pub struct ChatService {

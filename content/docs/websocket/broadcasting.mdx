@@ -26,7 +26,7 @@ Without the import, gateways still work — each message is handled request-resp
 ```rust
 use toni::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
 use toni::WsHandlerResult;
-use toni_macros::{module, new, subscriptions, websocket_gateway};
+use toni::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway {
@@ -102,7 +102,7 @@ Room membership management (`join_room`, `leave_room`, and queries) is covered i
 
 ```rust
 use toni::websocket::{BroadcastService, WsMessage};
-use toni_macros::{injectable, new};
+use toni::{injectable, new};
 
 #[injectable]
 pub struct NotificationService {
@@ -135,7 +135,7 @@ use serde::Deserialize;
 use toni::extractors::Json;
 use toni::websocket::{BroadcastModule, BroadcastService, WsMessage};
 use toni::*;
-use toni_macros::{module, new, subscriptions, websocket_gateway};
+use toni::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/notifications")]
 pub struct NotificationGateway {

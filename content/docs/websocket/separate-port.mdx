@@ -11,7 +11,7 @@ Use this to isolate WebSocket traffic from HTTP (separate load balancing, firewa
 
 ```rust
 use toni::websocket::{WsClient, WsHandlerResult, WsMessage};
-use toni_macros::{module, new, subscriptions, websocket_gateway};
+use toni::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/ws", port = 4000)]
 pub struct PingGateway {}
@@ -109,7 +109,7 @@ The adapter accepts raw TCP connections and performs the WebSocket handshake its
 
 - **No handshake data.** The upgrade request is not surfaced to the framework — `client.handshake.headers` and `client.handshake.query` are empty. Guards that read handshake headers always see none; authenticate separate-port clients through a first-message protocol instead. The result of that first-message auth belongs in `ctx.session()`, where every later message on the connection can read it — see [Session](/docs/websocket/gateways#session).
 - **One gateway per port.** Raw TCP routing has no path concept — all connections on a port go to the first registered path binding, regardless of the URL path the client used. Give each gateway its own `port` value.
-- **Ping/pong frames are ignored.** The read loop drops them; they are never routed to handlers (the same is true of same-port gateways — control frames stay in the adapter layer).
+- **Ping and pong frames are dropped.** The read loop discards them before the gateway sees them. This is where the adapter differs from the same-port ones: there a ping reaches the gateway, fails event extraction, and draws an error frame back at the client — see [Message routing](/docs/websocket/gateways#message-routing).
 
 Everything else works as on the shared port: `#[subscribe_message]` routing, connection hooks, guards and interceptors, broadcasting, and `WsHandlerOutput::Stream`.
 

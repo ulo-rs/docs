@@ -30,7 +30,7 @@ No separate WebSocket adapter is needed for the common case. To run a gateway on
 
 ```rust
 use toni::*;
-use toni_macros::{module, new, subscriptions, websocket_gateway};
+use toni::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct EchoGateway {}
@@ -76,14 +76,14 @@ Incoming text frames must be JSON with an `event` field. The value routes the me
 
 A handler that takes `WsMessage` receives the **entire frame** — `message.as_text()` returns the full JSON string. A handler that wants the frame parsed takes `Payload<T>` instead (see [Handler parameters](#handler-parameters)).
 
-Routing edge cases:
+Routing edge cases — the connection stays open through all of them:
 
-- An `event` value with no matching handler produces a `NotFound` error frame; the connection stays open.
-- Frames that are not JSON, or lack the `event` field, are answered with an error frame; the connection stays open.
-- Binary frames are not routed to handlers.
-- Ping/pong control frames are handled at the adapter layer and never reach the gateway.
+- An `event` value with no matching handler raises the `Unrouted` framework event. Unclaimed, it renders the canonical envelope with kind `NotFound` and the message `nothing handles <event>`. A `#[catch(Unrouted)]` handler gets first claim on the shape — see [Framework events](#framework-events).
+- A frame that is not JSON, or that carries no `event` field, fails event extraction before the dispatcher runs. The sender is answered `{"error": "Invalid message format: Missing 'event' field in JSON message"}` — a different shape from the canonical envelope below, so parse it for `error`, not for `status` and `kind`.
+- Binary frames draw the same `error` shape: event extraction reads text only.
+- Ping and pong frames reach the gateway on every same-port adapter and fail event extraction, so a browser or proxy sending keepalive pings draws one `{"error": "Invalid message format: Control frames don't have events"}` per ping. `TungsteniteAdapter` is the exception — its read loop discards ping and pong before the gateway sees them.
 
-The routing field name comes from `GatewayTrait::event_field()`, which defaults to `"event"`. Overriding it (e.g. to `"type"` for graphql-ws protocol compatibility) requires implementing `GatewayTrait` by hand instead of using the macro.
+The routing field name comes from `GatewayTrait::event_field()`, which defaults to `"event"`. The macro has no knob for it: overriding it — `"type"`, for graphql-ws — means writing the `GatewayTrait` impl by hand.
 
 ## Handler parameters
 
@@ -94,11 +94,14 @@ A `#[subscribe_message]` handler takes whatever parameters it needs — each one
 | `WsClient` | the sending client — id, handshake, session |
 | `WsMessage` | the raw inbound frame |
 | `Payload<T>` | the frame deserialized into `T: DeserializeOwned` |
+| `Validated<Payload<T>>` | the same, validated against `T`'s `#[validate]` attributes before the handler runs |
 | `Session` | the connection's store (see [Session](#session)) |
 | `Extensions` | the per-message bag guards and interceptors write to |
 | `&WsContext` | the full context |
 
-The `(client: WsClient, message: WsMessage)` pair used above is the common case, not a required shape. `Payload<T>` (from `toni::extractors`) parses text frames with `serde_json::from_str` and binary frames with `from_slice`, replacing hand-extraction of `data` fields:
+The `(client: WsClient, message: WsMessage)` pair used above is the common case, not a required shape. Any type of your own implementing `FromContext<WsContext>` is a parameter too. Parameter names carry no meaning here: `&WsContext` is recognised by its shape, and every other parameter means what its type means.
+
+`Payload<T>` (from `toni::extractors`) parses text frames with `serde_json::from_str` and binary frames with `from_slice`. It deserializes the **whole frame**, not a `data` sub-object — `ChatInput` below matches because `data` is a top-level field of the frame, and the routing field is ignored as an unknown one:
 
 ```rust
 #[derive(serde::Deserialize)]
@@ -109,6 +112,24 @@ struct ChatInput {
 #[subscribe_message("message")]
 async fn handle_message(&self, Payload(input): Payload<ChatInput>) -> WsHandlerResult {
     Ok(WsMessage::text(format!("Echo: {}", input.data)).into())
+}
+```
+
+`Validated<Payload<T>>` runs `T`'s `validator` attributes after parsing and refuses the frame when they fail:
+
+```rust
+use toni::extractors::{Payload, Validated};
+use validator::Validate;
+
+#[derive(serde::Deserialize, Validate)]
+struct CreateUser {
+    #[validate(length(min = 3))]
+    name: String,
+}
+
+#[subscribe_message("users.create")]
+async fn create(&self, Validated(Payload(dto)): Validated<Payload<CreateUser>>) -> WsHandlerResult {
+    Ok(WsMessage::text(format!("created:{}", dto.name)).into())
 }
 ```
 
@@ -149,13 +170,15 @@ async fn on_count(&self) -> WsHandlerResult {
 
 The handler returns immediately; delivery happens in a background task.
 
+A stream dropped before it drains — the client went away — cancels the execution carrying it. Whatever feeds the stream sees `ctx.cancellation()` fire and can stop producing.
+
 ## Connection lifecycle hooks
 
 `#[on_connect]`, `#[on_disconnect]`, and `#[after_init]` are standalone per-method macros — they go in a plain impl block and need no `#[subscriptions]`:
 
 ```rust
 use toni::websocket::{WsClient, WsError};
-use toni_macros::{after_init, on_connect, on_disconnect, websocket_gateway};
+use toni::{after_init, on_connect, on_disconnect, websocket_gateway};
 
 #[websocket_gateway("/presence")]
 pub struct PresenceGateway {}
@@ -179,13 +202,48 @@ impl PresenceGateway {
 }
 ```
 
-- `#[on_connect]` — `async fn(&self)`, `async fn(&self, client: &WsClient)`, or `async fn(&self, client: &WsClient, ctx: &WsContext)`, each returning `Result<(), WsError>`. Returning `Err` rejects the connection.
-- `#[on_disconnect]` — the same three shapes without the `Result`. Runs when the client disconnects; no guards or other enhancers run on disconnect.
+- `#[on_connect]` — `async fn(&self)`, `async fn(&self, client: &WsClient)`, or `async fn(&self, client: &WsClient, ctx: &WsContext)`, each returning `Result<(), WsError>`. Returning `Err` refuses the connection, and the caller is told why — see [Refusing a connection](#refusing-a-connection).
+- `#[on_disconnect]` — the same three shapes without the `Result`. Runs when the client disconnects; no guards or other enhancers run on disconnect. `GatewayTrait::on_disconnect` also receives a `DisconnectReason`, which the macro forms do not forward: a hook that has to tell a clean close from a transport error needs a hand-written `GatewayTrait` impl.
 - `#[after_init]` — `async fn(&self)`. Runs once after the gateway path is registered with the adapter, before any connections.
 
 The optional trailing `&WsContext` is how a hook reaches the connection's [session](#session) — a disconnect hook that needs what a connect guard stored declares it as a second parameter.
 
 A gateway with no `#[subscriptions]` impl at all is valid: it accepts connections (and can broadcast to them) without routing any messages. `#[websocket_gateway]` alone is a complete connection-only gateway.
+
+## Refusing a connection
+
+Connect guards and `#[on_connect]` run *after* the WebSocket handshake, so there is no HTTP status left to refuse with. The refusal is answered on the socket instead: the canonical envelope as a text frame, then a close frame carrying an RFC 6455 code. A browser reads the code and reason off its `close` event without parsing anything; the envelope is there for a client that wants a machine-readable reason.
+
+The code follows from what caused the refusal:
+
+| Cause | Close code |
+|---|---|
+| A guard answering `false`, or a `WsError` the caller provoked — `AuthFailed`, `InvalidMessage`, `EventNotFound` | 1008 Policy Violation |
+| A domain error whose kind is `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict` or `UnprocessableEntity` | 1008 Policy Violation |
+| A domain error whose kind is `TooManyRequests` | 1013 Try Again Later |
+| Anything the server got wrong, a panicking connect guard included | 1011 Internal Error |
+
+RFC 6455 defines no auth-specific code, which is why an unauthorized connect also closes with 1008. A guard's `false` renders kind `Unauthorized` in the envelope; a panicking guard renders `Internal`.
+
+For a subprotocol that defines its own refusal codes, the envelope is noise the client has no grammar for. `WsError::Refused` closes with the code you name and sends nothing before it — graphql-ws, for instance, closes with 4406 when the requested subprotocol is unacceptable:
+
+```rust
+use toni::websocket::{WsClient, WsError};
+
+#[on_connect]
+async fn connected(&self, client: &WsClient) -> Result<(), WsError> {
+    let protocol = client.handshake.headers.get("sec-websocket-protocol");
+    if protocol.map(String::as_str) != Some("graphql-transport-ws") {
+        return Err(WsError::Refused {
+            code: 4406,
+            reason: "Subprotocol not acceptable".into(),
+        });
+    }
+    Ok(())
+}
+```
+
+A gateway served by `TungsteniteAdapter` surfaces no handshake headers, so a check like this belongs on a gateway an HTTP adapter serves — see [Separate-Port Gateways](/docs/websocket/separate-port).
 
 ## WsClient
 
@@ -249,14 +307,19 @@ Two stores, two lifetimes: the session lives as long as the connection; `ctx.ext
 
 ## WsMessage
 
+Five variants: `Text(String)`, `Binary(Vec<u8>)`, `Ping(Vec<u8>)`, `Pong(Vec<u8>)`, and `Close(Option<CloseFrame>)`.
+
 ```rust
-WsMessage::text("hello")             // text frame
-WsMessage::binary(vec![0u8, 1, 2])   // binary frame
-WsMessage::close()                   // close frame
+WsMessage::text("hello")                    // text frame
+WsMessage::binary(vec![0u8, 1, 2])          // binary frame
+WsMessage::close()                          // close frame, no code
+WsMessage::close_with(1008, "not allowed")  // close frame carrying a code and reason
 
 message.as_text()    // Option<&str>
 message.as_binary()  // Option<&[u8]>
 ```
+
+`CloseFrame { code: u16, reason: String }` lives at `toni::websocket::CloseFrame`. RFC 6455 caps a close payload at 125 bytes, two of which are the code, so `close_with` truncates the reason to 123 bytes on a character boundary rather than building a frame the peer rejects.
 
 ## Error handling
 
@@ -275,6 +338,8 @@ The `kind` per variant:
 | `EventNotFound(msg)` | `NotFound` |
 | `ConnectionClosed(msg)` | `Unavailable` |
 | `Internal(msg)` / `BroadcastError(msg)` | `Internal` |
+| `Refused { code, reason }` | `BadRequest` — but a refused *connect* sends no envelope at all, only the close (see [Refusing a connection](#refusing-a-connection)) |
+| `AppError(err)` | the wrapped error's own kind |
 
 Domain error types implementing `toni::Error` (via `#[derive(toni::Error)]` + `#[error_kind(KIND)]`) lift into `WsError::AppError` automatically through `?` — the envelope then carries the error's own `kind`, `message`, and optional `details`:
 
@@ -291,6 +356,38 @@ async fn create(&self, msg: WsMessage) -> WsHandlerResult {
 ```
 
 `BroadcastError` from `.send()` calls also converts via `?`. Panics in handlers are caught by the framework, rendered as an error frame, and do not tear down the connection.
+
+### A guard rejecting a message
+
+A guard that answers `false` for a message does not drop it. The rejection becomes a `GuardRejection` framework event, offered to the error chain, and unclaimed it renders the canonical envelope with kind `Forbidden` back to the sender. The connection stays usable and the next message runs normally.
+
+A guard rejecting a *connect* is the other case: there is no message to answer, so the refusal renders kind `Unauthorized` and the connection closes. See [Refusing a connection](#refusing-a-connection).
+
+### Framework events
+
+Three of the framework's own events reach the error chain while a message is being dispatched. A connect runs no chain, so none of them is claimable there.
+
+| Event | Raised when | `kind` |
+|---|---|---|
+| `GuardRejection` | a guard answered `false` | `Forbidden` |
+| `Unrouted` | the frame's `event` has no handler | `NotFound` |
+| `PanicRecovered` | a guard, interceptor or handler panicked | `Internal` |
+
+`#[catch(T)]` lowers a free async function into a handler for one of them. Note the return type: the WebSocket chain answers with a bare `WsMessage`, not the `WsHandlerResult` a handler returns.
+
+```rust
+use toni::context::WsContext;
+use toni::errors::Unrouted;
+use toni::websocket::WsMessage;
+use toni::catch;
+
+#[catch(Unrouted)]
+async fn unknown_event(err: &Unrouted, _ctx: &WsContext) -> WsMessage {
+    WsMessage::text(serde_json::json!({ "unknown_event": err.target }).to_string())
+}
+```
+
+All three types live in `toni::errors`. `GuardRejection` and `PanicRecovered` are re-exported at the crate root as well; `Unrouted` is not, so import it by its full path. Register the handler on the factory with `factory.use_global_ws_error_handler(Arc::new(unknown_event))`. For a handler scoped to one gateway or one event, write an `#[injectable]` provider implementing `ErrorHandler<WsContext, WsMessage>` and name it in `#[use_error_handlers]` — see [WebSocket + DI](/docs/websocket/with-di#error-handlers-on-gateways).
 
 ## Namespaces
 
