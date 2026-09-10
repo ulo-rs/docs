@@ -5,11 +5,12 @@ description: The surfaces docs.rs cannot describe on its own — macro forms, wi
 
 [docs.rs](https://docs.rs/toni) is the complete, generated reference for every type in every crate, and it is always current with the published version. These pages exist for what a generated reference cannot show: the shape a procedural macro expects, the JSON an RPC transport puts on the wire, and the behaviour an adapter has that its type signature does not state.
 
-Crates without a page here are documented on docs.rs and in their guide chapter.
+A crate has a page here when an application writes its names directly and that surface is more than one constructor call — the framework crates, the tools, and the adapters and transports carrying knobs, a wire format, or capability gaps of their own. Every adapter and transport also has a guide chapter: [HTTP adapters](/docs/http-adapters) and [Microservices](/docs/microservices) carry the choice between them and the worked setup, and for the crates without a page here they are the whole reference alongside docs.rs.
 
 <Cards>
-  <Card title="toni (core)" href="/docs/api-reference/core" description="The factory, application lifecycle, contexts, enhancer traits, and errors." />
+  <Card title="toni (core)" href="/docs/api-reference/core" description="The factory, application lifecycle, contexts, enhancer traits, extractors, and errors." />
   <Card title="toni-macros" href="/docs/api-reference/macros" description="Every attribute, derive, and function-like macro, with the forms each accepts." />
+  <Card title="toni-grpc" href="/docs/api-reference/grpc" description="The gRPC adapter's knobs, the request extractors, and the build-script step." />
   <Card title="toni-axum" href="/docs/api-reference/axum" description="The default HTTP adapter, including separate-port WebSocket." />
   <Card title="toni-actix" href="/docs/api-reference/actix" description="The Actix-web adapter and the buffering it imposes." />
   <Card title="toni-tcp" href="/docs/api-reference/tcp" description="The TCP RPC adapter, client transport, and wire envelope." />

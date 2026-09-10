@@ -5,7 +5,7 @@ description: Reference for all procedural macros provided by the toni-macros cra
 
 All macros are re-exported through the `toni` crate — no direct `toni-macros` dependency is needed.
 
-There are no `#[guard]` / `#[interceptor]` / `#[pipe]` / `#[middleware]` / `#[error_handler]` marker macros. Enhancer roles are detected from the trait impl: declare `#[injectable]`, implement `Guard<C>` / `Interceptor<C, R>` / `Pipe<C, R>` / `ErrorHandler<C, R>` / `Middleware`, list the type in `providers`, and apply it with `#[use_*]` or a factory `use_global_*` call.
+There are no `#[guard]` / `#[interceptor]` / `#[middleware]` / `#[error_handler]` marker macros. Enhancer roles are detected from the trait impl: declare `#[injectable]`, implement `Guard<C>` / `Interceptor<C, R>` / `ErrorHandler<C, R>` / `Middleware`, list the type in `providers`, and apply it with `#[use_*]` or a factory `use_global_*` call.
 
 ## Module
 
@@ -41,7 +41,7 @@ impl AppModule {
 
 ## Providers and controllers
 
-Providers, controllers, gateways, and RPC controllers all share one declaration shape: the attribute goes on the struct; handlers live in a separately-attributed impl block. The inline-struct forms (`#[controller("/p", pub struct X {...})]` etc.) are rejected with migration errors.
+Providers, controllers, gateways, RPC controllers, and gRPC services all share one declaration shape: the attribute goes on the struct; handlers live in a separately-attributed impl block, and that impl's attribute names the transport — `#[routes]` for HTTP, `#[patterns]` for RPC, `#[subscriptions]` for WebSocket, `#[grpc_methods(proto::Trait)]` for gRPC. One transport per struct: a second handler impl collides on the dispatch entry point the first one wrote. No form takes a struct inline in the attribute.
 
 ### `#[injectable]`
 
@@ -59,6 +59,10 @@ pub struct UserService {
 ```
 
 Adds the `Clone` impl the container needs. Construction logic (`#[new]`) and lifecycle hooks live on the struct's plain `impl`.
+
+### `#[derive(InjectFields)]`
+
+Keeps `#[inject]` and `#[default]` valid as inert field attributes. `#[injectable]`, `#[controller]`, `#[websocket_gateway]` and the rest re-emit your struct with this derive on it and run their own provider codegen, so the derive itself emits nothing. It appears in expanded code rather than in what you write.
 
 ### `#[inject]` / `#[default]` (field attributes)
 
@@ -152,7 +156,7 @@ For setup that can fail before streaming starts, use a `#[get]` handler returnin
 
 **Target:** handler methods, and the `#[routes]` / `#[subscriptions]` / `#[patterns]` / `#[grpc_methods]` impl block (applies to every handler in it). Takes one expression per attribute; repeatable. Attaches typed metadata, stored once at startup and read by enhancers via `ctx.metadata().and_then(|m| m.get::<T>())`.
 
-Every declaration is kept: `get::<T>()` returns the most specific (the handler's over the impl block's), `get_all::<T>()` returns all of them, least-specific first. Works on all four transports; gRPC handlers cannot read it (their signature is the tonic trait's), but their guards, interceptors, and error handlers can.
+Every declaration is kept: `get::<T>()` returns the most specific (the handler's over the impl block's), `get_all::<T>()` returns all of them, least-specific first. Works on all four transports, and a gRPC handler reads it like any other — through the `&GrpcContext` it takes as a parameter.
 
 ```rust
 #[derive(Clone)]
@@ -166,7 +170,7 @@ async fn admin_panel(&self) -> impl IntoResponse { ... }
 
 ## Enhancer attributes
 
-### `#[use_guards]`, `#[use_interceptors]`, `#[use_pipes]`, `#[use_error_handlers]`
+### `#[use_guards]`, `#[use_interceptors]`, `#[use_error_handlers]`
 
 **Target:** handler methods (method-level), or the `#[routes]` / `#[subscriptions]` / `#[patterns]` / `#[grpc_methods]` impl block (controller-level, applies to every handler in it).
 
@@ -178,7 +182,7 @@ Three argument forms, each repeatable and combinable:
 #[use_guards(RoleGuard::new("admin"))]        // constructor call
 ```
 
-Execution order: global → controller → method for guards/interceptors/pipes; method → controller → global for error handlers (most specific first). Interceptors run their after-phase in reverse order.
+Execution order: global → controller → method for guards and interceptors; method → controller → global for error handlers (most specific first). Interceptors run their after-phase in reverse order.
 
 ```rust
 #[routes]
@@ -202,8 +206,8 @@ async fn shape_rejection(err: &GuardRejection, _ctx: &HttpContext) -> HttpRespon
         .build()
 }
 
-// Apply like any error handler:
-#[use_error_handlers(shape_rejection)]
+// A #[catch] struct is a value, not a provider: instantiate it.
+#[use_error_handlers(shape_rejection {})]
 ```
 
 The primary error path needs no `#[catch]` — a domain type implementing `toni::Error` renders automatically on every transport. Reach for `#[catch]` to reshape framework events or apply per-route custom rendering.
@@ -273,72 +277,93 @@ A hook takes what it asks for, positionally. The trailing `&WsContext` is how a 
 
 ## RPC controller macros
 
-### `#[rpc_controller]`
+### `#[patterns]`
 
-**Target:** struct. Same field rules as `#[injectable]`. A dispatch target — declare it in the module's `controllers:` list, not `providers:` (WebSocket gateways stay in `providers:`). RPC has no connection hooks — `#[patterns]` is the only impl marker. A bare `#[rpc_controller]` with no `#[patterns]` is valid and routes nothing.
+**Target:** the impl block holding an RPC controller's handlers. Scans `#[message_pattern]` / `#[event_pattern]` methods into the pattern router; hosts controller-level `#[use_*]` attributes.
+
+An RPC controller is a `#[controller]` struct whose handlers live in a `#[patterns]` impl — the impl attribute is what makes the struct dispatch RPC. Declare it in the module's `controllers:` list, not `providers:` (WebSocket gateways stay in `providers:`). RPC has no connection hooks, so `#[patterns]` is the only impl marker; an empty one is the form that routes nothing.
 
 ```rust
-#[rpc_controller]
+#[controller]
 pub struct OrdersController {
     #[inject] svc: OrderService,
 }
 ```
 
-### `#[patterns]`
-
-**Target:** the RPC controller's impl block. Scans `#[message_pattern]` / `#[event_pattern]` methods; hosts controller-level `#[use_*]` attributes.
+The `#[controller]` attribute's route prefix is HTTP's argument; a prefix on a controller that dispatches patterns is unused, and says so at startup.
 
 ### `#[message_pattern]` / `#[event_pattern]`
 
 **Target:** methods in a `#[patterns]` impl.
 
 - `#[message_pattern("p")]` — request-response; the return value is sent back.
-- `#[event_pattern("p")]` — fire-and-forget; nothing is sent back.
+- `#[event_pattern("p")]` — fire-and-forget; nothing is sent back, and the handler returns `Result<(), RpcError>`.
 
 ```rust
 #[patterns]
 impl OrdersController {
     #[message_pattern("order.create")]
-    async fn create(&self, data: RpcData, ctx: &RpcContext) -> Result<RpcData, RpcError> { ... }
+    async fn create(&self, Payload(dto): Payload<CreateOrder>) -> Result<OrderView, OrderError> { ... }
 
     #[event_pattern("order.cancelled")]
     async fn on_cancelled(&self, data: RpcData, ctx: &RpcContext) -> Result<(), RpcError> { ... }
 }
 ```
 
-Parameters are `FromContext<RpcContext>` extractors, in any order and any subset (including none): `RpcData`, `Payload<T>`, `Extensions`, or `&RpcContext` itself. A parameter of any other type is the call's payload, deserialised into it via `RpcData::parse`; a `Serialize` return type is serialised via `from_serialize`. Errors may be any `toni::Error` type (auto-lifted to `RpcError::AppError` via `?`).
+Every parameter is a `FromContext<RpcContext>` extractor, in any order and any subset (including none): `Payload<T>` for the call's message, `RpcData` for it untouched, `Extensions`, `Validated<Payload<T>>`, or an extractor of your own. `&RpcContext` passes through. A type that is none of these fails at the parameter, with a note naming the extractors to reach for.
+
+An `Ok` value that is not `RpcData` is serialised with `RpcData::from_serialize`. Errors may be any `toni::Error` type — `?` lifts one into `RpcError::AppError`.
+
+A handler declaring `-> RpcHandlerResult` (or `Result<RpcHandlerOutput, E>`) has its output passed through untouched, which is how it answers with a stream:
+
+```rust
+#[message_pattern("order.watch")]
+async fn watch(&self, Payload(id): Payload<OrderId>) -> RpcHandlerResult {
+    // progress() yields Result<RpcData, RpcError> items
+    Ok(RpcHandlerOutput::Stream(Box::pin(self.svc.progress(id))))
+}
+```
 
 ## gRPC service macros
 
-### `#[grpc_service]`
-
-**Target:** the service's inherent impl block, with the struct definition inline in the attribute (or a separate struct plus a `fn new(...)` constructor in the impl). A dispatch target — declare it in the module's `controllers:` list; the framework hands it to the gRPC adapter at bind time. A request-scoped service is built per call rather than once.
-
-```rust
-#[grpc_service(pub struct OrdersGrpcService {
-    #[inject] repo: OrdersRepo,
-})]
-impl OrdersGrpcService {
-    pub fn new(repo: OrdersRepo) -> Self { Self { repo } }
-}
-```
-
 ### `#[grpc_methods]`
 
-**Target:** the `impl ProtoTrait for YourService` block (the tonic-generated service trait). Passes the impl through unchanged and emits the `GrpcServiceTrait` wiring that wraps the service in its tonic `*Server` and routes calls through the enhancer pipeline. `#[use_*]` attributes apply at the impl (service) or method level.
-
-The `*Server` wrapper type is inferred from the trait name; override with `server = …`:
+**Target:** the inherent impl holding a gRPC service's handlers. The attribute names the proto trait the service implements, and the macro writes that trait's impl around the handlers. A gRPC service is an ordinary `#[controller]` struct, declared in the module's `controllers:` list; annotating a trait impl is an error naming the form to write.
 
 ```rust
-#[grpc_methods(server = orders_proto::OrdersServer)]
-#[tonic::async_trait]
+#[controller]
+pub struct OrdersService {
+    #[inject] repo: OrdersRepo,
+}
+
+#[grpc_methods(orders_pb::orders_server::Orders)]
 #[use_guards(AuthGuard)]
-impl Orders for OrdersGrpcService {
+impl OrdersService {
+    #[new]
+    pub fn new(repo: OrdersRepo) -> Self { Self { repo } }
+
+    #[grpc_method]
     #[use_interceptors(LoggingInterceptor)]
-    async fn create(&self, req: tonic::Request<CreateOrderRequest>)
-        -> Result<tonic::Response<CreateOrderResponse>, tonic::Status> { ... }
+    async fn create(&self, Payload(req): Payload<orders_pb::CreateOrderRequest>)
+        -> Result<orders_pb::CreateOrderResponse, OrderError> { ... }
 }
 ```
+
+- Each handler is marked `#[grpc_method]`, or `#[grpc_stream]` for a streaming reply. Unmarked items stay as written — the `#[new]` constructor, lifecycle hooks, private helpers.
+- Every parameter is a `FromContext<GrpcContext>`, in any order: `Payload<T>` (the message), `Inbound<T>` (the caller's stream), `toni_grpc::GrpcRequest<T>` (the whole tonic request), `Extensions`, an extractor of your own. `&GrpcContext` passes through. All three request extractors take the request, so two of them in one handler fail to compile naming both.
+- A handler answers with the reply message, with `tonic::Response<T>` to set reply metadata, or with the bare reply and no `Result` where it cannot fail. The error type implements `toni::Error`.
+- `#[grpc_stream]` reads the trait's associated stream type from the method name — `watch_progress` pairs with `WatchProgressStream`. Where the trait's own naming does not connect the two, name it: `#[grpc_stream(StreamProgressStream)]`.
+- Attribute keys: `server = path::to::OrdersServer` where the tonic wrapper is not the trait's name with `Server` appended, and `shapes = path` where the method markers are not in the module beside the trait.
+- `#[use_*]` and `#[set_metadata]` apply on the impl (every handler) or on one handler.
+
+What the wire carries comes from the proto, not from the handler, so the build script writes it down beside the generated trait:
+
+```rust title="build.rs"
+tonic_prost_build::compile_protos("proto/orders.proto")?;
+toni_build::shapes("toni_examples.orders")?;
+```
+
+`toni_build::shapes` takes the string `tonic::include_proto!` takes and appends one marker type per method, which the macro projects the request type through. A crate writing `#[grpc_methods]` needs `toni-grpc` as a dependency and [`toni-build`](/docs/api-reference/grpc#toni-build) as a build-dependency to compile. The worked form is in the [gRPC quick start](/docs/grpc/quick-start).
 
 ## Derive macros
 
@@ -392,10 +417,11 @@ Used inside a module's `providers: [...]` list. Token position accepts a string 
 
 ```rust
 provider_value!("APP_NAME", "ToniApp".to_string())
-provider_value!(Duration, Duration::from_secs(60))     // type-based token
+provider_value!(Duration, Duration::from_secs(60))              // type-based token
+provider_value!("CLIENT", RpcClient::new(transport), lifecycle) // participates in lifecycle hooks
 ```
 
-Registers a constant value.
+Registers a constant value. Optional trailing arguments, comma-separated: a type hint naming the produced type, and `lifecycle` — the value's own lifecycle hooks run, which is how a client connects at bootstrap and closes at shutdown.
 
 ### `provider_factory!`
 

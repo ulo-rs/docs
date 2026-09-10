@@ -4,6 +4,7 @@
     "index",
     "core",
     "macros",
+    "grpc",
     "axum",
     "actix",
     "tcp",

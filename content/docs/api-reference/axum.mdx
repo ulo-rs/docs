@@ -19,7 +19,9 @@ app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await.unwrap();
 ```
 
-`AxumAdapter` also handles WebSocket upgrades on the same port. Gateway routes annotated with `#[websocket_gateway]` are wired automatically when `start()` is called — no separate WebSocket adapter is needed.
+The second argument is a [`BindTarget`](/docs/techniques/bind-targets): an address to bind, or a `std::net::TcpListener` already bound and listening.
+
+`AxumAdapter` is the one adapter implementing both `HttpAdapter` and `WebSocketAdapter`, so it serves WebSocket upgrades on the HTTP port and can also drive separate-port gateways. Routes for gateways annotated with `#[websocket_gateway]` are registered and bound by `app.bind()` — which `start()` calls — with no separate WebSocket adapter needed for the same-port case.
 
 ## Separate-port WebSocket
 
@@ -38,3 +40,16 @@ Then annotate the gateway with a port:
 #[websocket_gateway("/chat", port = 4000)]
 pub struct ChatGateway;
 ```
+
+## TokioSender
+
+The crate's second export: the `WsSink` a connection's outbound half is written through, wrapping a `tokio::sync::mpsc::Sender<WsMessage>`.
+
+```rust
+use toni_axum::TokioSender;
+
+TokioSender::new(sender: mpsc::Sender<WsMessage>) -> TokioSender
+sender.inner() -> &mpsc::Sender<WsMessage>
+```
+
+Applications get the sink through `WsClient` rather than building one; a test harness or a custom adapter that drives gateway handlers itself constructs it directly.

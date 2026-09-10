@@ -73,6 +73,8 @@ module.get_ref() -> &T
 - `from_env_file(Environment::Production)` loads `.env.production`; `Environment::Custom(name)` loads `.env.<name>`.
 - `.env` file loading is built in — the crate has no Cargo features.
 
+`ConfigModule<T>` is a module in its own right: its identity is `ModuleIdentity::of_type::<Self>()`, so two imports of the same `T` dedup into one, and modules over two different `T` stay distinct and each register their own `ConfigService`.
+
 ---
 
 ## ConfigService&lt;T&gt;
@@ -94,6 +96,8 @@ impl AppService {
 ```
 
 ```rust
+ConfigService::new(config: Arc<T>) -> ConfigService<T>   // for tests and hand-built containers
+
 service.get() -> T        // clones the config
 service.get_ref() -> &T   // zero-copy
 ```
@@ -144,6 +148,26 @@ pub struct AppConfig {
     pub port: u16,
 }
 ```
+
+---
+
+## Traits
+
+```rust
+pub trait FromEnv: Sized {
+    fn load_from_env() -> Result<Self, ConfigError>;
+}
+
+pub trait Validate {
+    fn validate(&self) -> Result<(), ConfigError>;
+}
+
+pub trait Config: FromEnv + Validate + Clone + Send + Sync + 'static {}
+```
+
+`#[derive(Config)]` writes the first two. `Config` itself is a blanket impl over anything satisfying its bounds, so nothing implements it directly — a type that derives the macro and is `Clone + Send + Sync` is already a `Config`, and that is the bound `ConfigModule<T>` and `ConfigService<T>` ask for.
+
+`Validate` here is the crate's own, not `validator`'s: the derive's implementation calls `validator::Validate` where the struct carries `#[validate(...)]` attributes, and does nothing where it does not.
 
 ---
 
