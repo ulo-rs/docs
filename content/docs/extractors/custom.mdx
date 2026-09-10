@@ -1,6 +1,6 @@
 ---
 title: Custom Extractors
-description: Implement FromContext to extract any data from incoming requests with full type safety.
+description: Implement FromContext to turn your own type into a handler parameter, on any transport.
 ---
 
 When the built-in extractors don't cover your case, implement the extraction trait on your own type. The framework calls it automatically whenever the type appears in a handler signature.
@@ -13,16 +13,22 @@ Every extractor — built-in or custom, on any transport — implements `FromCon
 pub trait FromContext<C: HandlerContext>: Sized {
     type Error: fmt::Display;
 
+    /// Whether extracting this consumes what it reads, leaving nothing for a
+    /// second extractor.
+    const CONSUMES: bool = false;
+
     fn extract(ctx: &C) -> impl Future<Output = Result<Self, Self::Error>> + Send;
 }
 ```
 
 `C` is the context the extractor reads from — `HttpContext` for HTTP handlers. An extractor names the contexts it is valid for by which impls it carries, so reaching for an HTTP extractor in a WebSocket handler is a trait-bound error, not a runtime surprise.
 
+`CONSUMES` is how a type declares that it takes the single-use request body. The handler macros read it off every parameter and reject two consumers at compile time, so an extractor that sets it is checked exactly like `Json<T>`. It defaults to `false`, which is right for everything that only reads metadata.
+
 On HTTP there are two shapes, and which one you write decides whether the extractor touches the body:
 
-- **Metadata** — headers, path params, query params, extensions. Borrow the request parts with `ctx.request()`, which returns `&RequestPart` and leaves the body alone. Any number of these can run on one handler.
-- **The body** — call `take_body::<Self>(ctx)?`, which yields the owned `HttpRequest` exactly once. A second body read fails with `BodyAlreadyRead`.
+- **Metadata** — headers, path params, query params, extensions. Borrow the request parts with `ctx.request()`, which returns `&RequestPart` and leaves the body alone. Any number of these can run on one handler. Leave `CONSUMES` at its default.
+- **The body** — call `take_body::<Self>(ctx)?`, which yields the owned `HttpRequest` exactly once, and declare `const CONSUMES: bool = true`. A second body read fails with `BodyAlreadyRead`.
 
 When an extractor returns `Err`, the handler never runs and the client receives an inline 400: `{"error": "Extraction failed", "details": "<your Error's Display output>"}`. Wrapping the parameter in `Option<T>` turns that failure into `None` instead.
 
@@ -135,7 +141,7 @@ The same composition builds aggregate extractors — an `AuthContext` combining 
 
 ## Body extractors
 
-An extractor that reads the body starts with `take_body`, and its error type wraps your own in `BodyExtractionError` so the already-read case has somewhere to go:
+An extractor that reads the body declares `CONSUMES` and starts with `take_body`. Its error type wraps your own in `BodyExtractionError` so the already-read case has somewhere to go:
 
 ```rust
 use std::fmt;
@@ -158,6 +164,9 @@ impl fmt::Display for YamlError {
 impl<T: DeserializeOwned + Send> FromContext<HttpContext> for Yaml<T> {
     type Error = BodyExtractionError<YamlError>;
 
+    // Reads the body, so the one-body check counts this parameter.
+    const CONSUMES: bool = true;
+
     async fn extract(ctx: &HttpContext) -> Result<Self, Self::Error> {
         let req = take_body::<Self>(ctx)?;
 
@@ -176,19 +185,21 @@ impl<T: DeserializeOwned + Send> FromContext<HttpContext> for Yaml<T> {
 
 `take_body::<Self>(ctx)?` yields the owned `HttpRequest` — parts plus body — exactly once per request. When something earlier in the handler already took it, `take_body` returns a `BodyAlreadyRead` naming your extractor, which `?` lifts into `BodyExtractionError::AlreadyRead`. Your own failures go through `BodyExtractionError::Extract`.
 
-### The one-body rule is a runtime check here
+### Declaring CONSUMES buys the compile-time check
 
-<Callout type="warn" title="The one-body check does not cover custom extractors">
-For the built-in body extractors, a handler with two body readers is a compile error — the controller macro recognizes them by type name and rejects the signature. It cannot recognize your types: custom extractors are exempt from that check, several of them may share a handler, and nothing at compile time records whether one of them reads the body.
+The one-body rule is enforced off the const, not off a list of known types. With `const CONSUMES: bool = true` on the impl, `Yaml<T>` beside `Json<T>` — or beside a second custom body extractor — is rejected when the crate builds, with both parameters named, exactly as two built-ins would be.
+
+<Callout type="warn" title="An undeclared body read is only caught at request time">
+Omit the const and the extractor still takes the body, but nothing counts it. The handler compiles, and the second reader to run gets `BodyAlreadyRead`: the client receives the standard 400, and the error is logged at `error` level naming the extractor, because the request was well-formed and the fault is the handler's signature.
 </Callout>
 
-A custom body extractor beside `Json<T>` — or beside another custom body extractor — compiles, and the second one to run gets `BodyAlreadyRead`: the client receives the standard 400, and the error is also logged at `error` level naming the extractor, because the request was well-formed and the fault is the handler's signature.
+That runtime path is not dead weight — it is what catches the body reads no signature can show, chiefly a guard that consumed the body before the handler ran.
 
-By the same token, a metadata extractor's body-freedom is a convention, not a compile-time guarantee — nothing stops an impl from calling `take_body` while presenting as a header reader. Keep body reads out of extractors that claim to be metadata.
+A metadata extractor's body-freedom is likewise a claim the impl makes, not something the compiler derives: nothing stops one from calling `take_body` while presenting as a header reader. An extractor that reads the body says so with the const; keep body reads out of the ones that do not.
 
 ## Validation support
 
-`Validated<E>` works with any extractor `E: FromContext<HttpContext> + ValidatableExtractor`. The second trait exposes the inner value for the `validator` crate:
+`Validated<E>` works with any extractor `E: FromContext<C> + ValidatableExtractor`, for whichever context `C` that extractor reads — the wrapper is not HTTP-specific. It forwards what it wraps: `Validated<E>::CONSUMES` is `E::CONSUMES`, so `Validated<Yaml<T>>` is the handler's body reader and `Validated<Query<T>>` is not. `ValidatableExtractor` exposes the inner value for the `validator` crate:
 
 ```rust
 pub trait ValidatableExtractor {
@@ -219,4 +230,29 @@ On failure, `Validated` produces `ValidationError` (exported alongside `Validata
 
 ## Other transports
 
-`FromContext` is not HTTP-specific. A WebSocket or RPC extractor is the same trait implemented against `WsContext` or `RpcContext`, and an impl against one context makes the type a valid parameter for that transport's handlers only — using it anywhere else is a trait-bound error.
+`FromContext` is one trait, and `C` picks the transport. Handlers are given a `HttpContext`, `WsContext`, `RpcContext`, or `GrpcContext` — `StandaloneContext` is the fifth, for an execution opened outside any transport — and an impl against one makes the type a valid parameter for that transport's handlers, and only there. Writing an extractor for a WebSocket gateway or an RPC controller is the same exercise as the ones above with a different `C` and a different source to read.
+
+Three of the framework's extractors are not tied to HTTP:
+
+| Extractor | Contexts | What it yields |
+| --- | --- | --- |
+| `Payload<T>` | `WsContext`, `RpcContext`, `GrpcContext` | the message, deserialized — a frame, a call's data, a proto request |
+| `Extensions` | every context | the per-execution typed bag, through one blanket impl |
+| `Validated<E>` | every context `E` reaches | `E`'s output, with its `#[validate]` rules already checked |
+
+`Inbound<T>` is gRPC-only: the caller's stream, for a client-streaming or bidirectional method. On HTTP there is no `Payload<T>` — the payload is the request body, and `Json<T>`, `Body<T>`, `Bytes`, and `BodyStream` name it more precisely.
+
+`CONSUMES` means something on gRPC too, where the request is taken from the execution once: `Payload<T>`, `Inbound<T>`, and `toni_grpc::GrpcRequest<T>` each declare it, and two of them in one handler is the same compile error naming both parameters. A WebSocket frame and an RPC call's data are buffered and read freely, so nothing on those two transports consumes.
+
+The context itself is not extracted. A handler takes `&HttpContext`, `&WsContext`, `&RpcContext`, or `&GrpcContext` as an ordinary parameter and the framework passes it through, in any position.
+
+A parameter whose type carries no impl for that handler's context is a trait-bound error naming both:
+
+```
+error[E0277]: `Order` is not an extractor for `RpcContext`
+   = note: a handler parameter is read from the context it is handed. Take one of the
+           framework's extractors — `Payload<T>` for a message, `Json<T>` or `Query<T>`
+           on HTTP — or implement `FromContext<RpcContext>` for `Order`.
+```
+
+For what each transport's handlers can take, see [WebSocket gateways](/docs/websocket/gateways#handler-parameters), [RPC controllers](/docs/microservices/rpc-controllers), and [gRPC](/docs/grpc/quick-start).

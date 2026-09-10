@@ -65,7 +65,9 @@ curl -X POST http://127.0.0.1:3000/upload \
 
 ## Field API
 
-Each `Field` (re-exported from `multer`) exposes:
+`next_field` yields `Result<Option<Field>, MultipartError>`. `Field` is `multer`'s, re-exported as `toni::extractors::multipart::Field` — the module path, not `toni::extractors::Field`. Naming it is only necessary to write a helper that takes one; the loop above never spells the type.
+
+Each field exposes:
 
 ```rust
 field.name() -> Option<&str>              // form field name
@@ -79,7 +81,7 @@ Fields must be consumed in order — calling `next_field` before fully reading t
 
 ## Error handling
 
-`next_field` returns `Result<Option<Field>, MultipartError>`. `MultipartError` covers two cases:
+`MultipartError` has two variants, and they are raised at different moments:
 
 ```rust
 pub enum MultipartError {
@@ -88,7 +90,16 @@ pub enum MultipartError {
 }
 ```
 
-A missing boundary means the request was not sent as `multipart/form-data`. For user-facing errors, map `MultipartError` to an `HttpError`:
+`MissingBoundary` is raised during extraction, before the handler runs, so a request that was not sent as `multipart/form-data` never reaches your code. The client gets the standard inline 400:
+
+```json
+{
+  "error": "Extraction failed",
+  "details": "missing multipart boundary in Content-Type"
+}
+```
+
+`Parse` is the only variant `next_field` can yield — a body that announced a boundary and then did not follow it. Handle it per field. Unwrapping it panics the handler, which the dispatcher renders as a 500; returning it as an `HttpError` gives the client the 400 the truncated upload deserves:
 
 ```rust
 use toni::{extractors::Multipart, HttpError};
@@ -103,3 +114,9 @@ async fn upload(&self, mut mp: Multipart) -> Result<Body, HttpError> {
     Ok(Body::json(serde_json::json!({ "ok": true })))
 }
 ```
+
+## Size and buffering
+
+The framework imposes no limit on an upload's size — the adapter decides. `toni-rocket` caps a request at 32 MiB; `toni-salvo` imposes no cap of its own. Enforce your own budget by counting bytes as you read fields, and reject past the threshold rather than after the allocation.
+
+On `toni-actix` and `toni-rocket` the whole body is buffered before `Multipart` sees it, so field-by-field reading there costs the memory up front. Incremental reads need `toni-axum`, `toni-salvo`, or `toni-poem`.

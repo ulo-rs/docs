@@ -5,7 +5,9 @@ description: Typed request data as handler parameters, checked at compile time.
 
 An extractor is a handler parameter whose type says what to pull out of the request. `Path<u32>` parses a route segment, `Json<T>` deserializes a body, `Multipart` streams an upload. Extraction failures answer with a 400 before the handler runs, so a handler body never validates its own inputs.
 
-One rule governs the whole chapter: a request has one body, and only one extractor may read it. That is checked at compile time for the built-in extractors, and both offending parameters are named in the error.
+One rule governs the whole chapter: a request has one body, and only one extractor may read it. Each type declares whether it reads the body, so the check is at compile time for every parameter — built-in, aliased, wrapped, or your own — and both offending parameters are named in the error.
+
+The trait behind all of this, `FromContext`, is not HTTP-specific: it is generic over the context a handler is given, so the same shape extracts a WebSocket frame, an RPC call, or a gRPC message. This chapter covers the HTTP extractors; [Custom Extractors](/docs/extractors/custom#other-transports) covers what carries across.
 
 <Cards>
   <Card title="Built-in Extractors" href="/docs/extractors/built-in" description="Path, Query, Json, Body, Bytes, streams, Extensions, and Validated." />

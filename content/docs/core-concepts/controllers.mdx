@@ -121,7 +121,7 @@ impl ItemsController {
 }
 ```
 
-Only one body-consuming extractor (`Json`, `Bytes`, `Body`, `BodyStream`, `Multipart`) may appear per handler. See [Extractors](/docs/extractors/built-in) for the full list.
+Only one body-consuming extractor may appear per handler: `Json`, `Bytes`, `Body`, `BodyStream`, `Multipart`, and `HttpRequest` each take the single-use request body. The check is on the parameter's type rather than a list of names — a custom extractor that declares it reads the body is counted too — and a second one is a compile error naming both parameters. See [Extractors](/docs/extractors/built-in) for the full list.
 
 ## Dependency injection
 
@@ -213,7 +213,7 @@ impl Guard<HttpContext> for AuthGuard {
 }
 ```
 
-Controller-level guards run for every route; method-level guards run in addition, after them. See [Guards](/docs/request-lifecycle/guards) for the full model. The same placement rules apply to `#[use_interceptors]`, `#[use_pipes]`, and `#[use_error_handlers]`.
+Controller-level guards run for every route; method-level guards run in addition, after them. See [Guards](/docs/request-lifecycle/guards) for the full model. The same placement rules apply to `#[use_interceptors]` and `#[use_error_handlers]`.
 
 ## Metadata
 

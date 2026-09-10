@@ -1,6 +1,6 @@
 ---
 title: Attribute Markers
-description: NestJS-style #[body], #[param], and #[query] annotations on handler parameters.
+description: "NestJS-style #[body], #[param], and #[query] annotations on handler parameters."
 ---
 
 Attribute markers annotate handler parameters directly — the NestJS-style `@Body()` / `@Param()` / `@Query()` shorthand. Instead of wrapping the parameter's type in an extractor, you mark it and receive the inner value:
@@ -82,7 +82,7 @@ fn search(
 
 `Option<T>` makes the parameter optional: missing → `None`. The sharp edge: a parameter that is present but unparseable still returns a 400, not `None` — `?limit=abc` for `Option<usize>` is an error, not an absent value.
 
-A name on a non-scalar type is ignored: `#[query("filters")] f: FilterSet` behaves exactly like `#[query] f: FilterSet`, deserializing the whole query string.
+The name belongs to this mode only. `#[query("filters")] f: FilterSet` — a name on a type that is not one of the scalars above — does not compile: it reports ``cannot find type `Query` in crate `::toni` ``, which names the generated path rather than the parameter that produced it. Drop the name and take the whole struct with `#[query]`, or take `Query<FilterSet>`.
 
 ### Defaults
 
@@ -99,10 +99,11 @@ fn list_products(
 }
 ```
 
-Two sharp edges:
+Three sharp edges:
 
 - The default swallows unparseable values, not only missing ones — `?page=abc` yields `1`, never a 400.
-- The default is a string literal parsed at request time, so a default that does not parse as the parameter's type panics on every request that falls back to it — not at compile time.
+- The default is a string literal parsed at request time, so a default that does not parse as the parameter's type panics on every request that falls back to it — not at compile time. The dispatcher catches the panic and offers it to the error chain as a `PanicRecovered`; unclaimed, the client gets a 500. The process survives, and the endpoint answers nothing else for as long as the literal is wrong.
+- `default` and `Option<T>` are mutually exclusive. The fallback parses into the parameter's declared type, and `Option<usize>` has no `FromStr` impl, so `#[query("limit", default = "10")] limit: Option<usize>` fails to compile. Pick one: a default, or `None` for a missing value.
 
 ## `#[param]`
 
@@ -124,16 +125,16 @@ The value is parsed with `str::parse`, so the type needs `FromStr` — not `Dese
 
 <FromNest>
 These are the closest thing Toni has to `@Param()`, `@Query()`, and `@Body()`,
-and they carry gotchas the typed extractors do not. `#[body]` bypasses the
-compile-time one-body check, so two of them compile and then fail at runtime.
-`#[param]` ignores a `default`. A `#[query]` default that fails to parse panics
-when a request arrives rather than at startup. Prefer `Path<T>`, `Query<T>`, and
-`Json<T>` unless you specifically want a marker's shape.
+and they carry gotchas the typed extractors do not. `#[param]` ignores a
+`default`. A `#[query]` default that fails to parse panics when a request
+arrives rather than at startup. A marker cannot share a signature with a typed
+extractor. Prefer `Path<T>`, `Query<T>`, and `Json<T>` unless you specifically
+want a marker's shape.
 </FromNest>
 
-## Mixing markers and extractors
+## Mixing markers
 
-Markers mix with each other and with typed extractors in one signature:
+Markers mix with each other:
 
 ```rust
 #[post("/users/{id}")]
@@ -145,10 +146,20 @@ fn update_user(&self, #[param("id")] user_id: i32, #[body] dto: CreateUserDto) -
 }
 ```
 
+They do not mix with typed extractors. A handler is bound through one path or the other, whole: put a marker beside a `Json<T>`, a `Path<T>`, or a custom extractor and the non-marker parameter is never bound, which surfaces as an arity mismatch on the generated call —
+
+```
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+```
+
+— or, for a custom extractor, `cannot find value` naming the parameter. Neither diagnostic points at the mix. Spell the whole signature one way.
+
 ## Error shapes
 
-Marker failures are inline 400 responses produced at the extraction site, bypassing the error-handler chain — the same delivery as [typed extractor failures](/docs/extractors/built-in#extraction-failures), but a different JSON shape. A typed extractor failure is always `{"error": "Extraction failed", "details": …}`; markers use per-marker messages (`"Failed to extract request body"`, `"Missing required query parameter"`, …) and name the offending parameter under `"param"` where one applies. A client, or a test, matching on one shape will miss the other when a handler mixes both styles.
+Marker failures are inline 400 responses produced at the extraction site, bypassing the error-handler chain — the same delivery as [typed extractor failures](/docs/extractors/built-in#extraction-failures), but a different JSON shape. A typed extractor failure is always `{"error": "Extraction failed", "details": …}`; markers use per-marker messages (`"Failed to extract request body"`, `"Missing required query parameter"`, …) and name the offending parameter under `"param"` where one applies. A client, or a test, matching on one shape will miss the other in an app whose controllers are written both ways.
 
 ## One body, still
 
-`#[body]` reads the request body through the same single-use channel as the typed body extractors, but it is invisible to the compile-time one-body check — that check only counts the typed extractors it recognizes in the signature. So `#[body]` beside `Json<T>` (or `Bytes`, `BodyStream`, `Multipart`, `HttpRequest`) compiles, and fails on every request at runtime: the second reader finds the body already taken, the client gets a 400, and a `BodyAlreadyRead` error naming the extractor is logged at error level. Use one body reader per handler, whichever style spells it.
+`#[body]` reads the request body through the same single-use channel as the typed body extractors, and it is counted the same way: the compile-time [one-body check](/docs/extractors/built-in) sees it as the `Body<T>` it extracts through. Two `#[body]` parameters, or a `#[body]` beside another body reader, are rejected before the crate builds, with both parameters named.
+
+That check reads each parameter's type, so what it cannot see is a body read that never appears in the signature — a guard that consumed the body before the handler ran, or a custom extractor that calls `take_body` without declaring `CONSUMES`. Those fail at request time instead: the second reader gets a 400, and a `BodyAlreadyRead` error naming the extractor is logged at error level.

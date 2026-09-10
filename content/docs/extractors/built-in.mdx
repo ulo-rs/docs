@@ -8,9 +8,16 @@ Extractors pull typed data out of the HTTP request. They appear as handler param
 Extractors come in two shapes:
 
 - **Metadata extractors** borrow the request parts (headers, path params, query params, extensions) and leave the body alone. `Path`, `Query`, `Request`, and `Extensions` work this way. Any number of them can sit on one handler.
-- **Body extractors** take the request body, which is single-use — it may be a stream. `Json`, `Body`, `Bytes`, `BodyStream`, and `Multipart` work this way.
+- **Body extractors** take the request body, which is single-use — it may be a stream. `Json`, `Body`, `Bytes`, `BodyStream`, `Multipart`, and `HttpRequest` work this way. Each declares `const CONSUMES: bool = true` on its `FromContext` impl.
 
-**Only one body extractor may appear per handler.** The rule is enforced twice: the controller macro rejects a second recognized body extractor at compile time, naming both offending parameters; a custom body extractor the macro cannot recognize fails at runtime instead, with a `BodyAlreadyRead` error naming itself.
+**Only one body extractor may appear per handler.** The controller macro reads `CONSUMES` off each parameter's written type and rejects a second body reader at compile time, naming both offending parameters:
+
+```
+`dto` and `raw` both read the request body, and it can only be read once.
+Keep one of them. If you need more than one view of the body, take `Bytes` (or `HttpRequest`) and parse it yourself.
+```
+
+Because the fact comes off the type rather than a list of names, an alias, an `Option`- or `Validated`-wrapped body extractor, a `#[body]` marker, and a [custom extractor](/docs/extractors/custom) that declares `CONSUMES` all count the same. What escapes the check is an extractor that calls `take_body` without declaring the const, and a guard that read the body before the handler ran — either way the second reader fails at request time with a `BodyAlreadyRead` error naming itself.
 
 Attribute markers (`#[body]`, `#[param]`, `#[query]`) offer a NestJS-style shorthand over these extractors — see [Attribute Markers](/docs/extractors/markers).
 
@@ -77,7 +84,7 @@ fn search(&self, Query(params): Query<SearchQuery>) -> HttpResponse {
 
 ## Json — JSON body
 
-Deserializes the request body as JSON. The `Content-Type` header is not checked — the bytes are parsed as JSON regardless. An empty body is an error, as is malformed JSON; both produce a 400.
+Deserializes the request body as JSON. The `Content-Type` header is not checked — the bytes are parsed as JSON regardless. An empty body is an error, as is malformed JSON; both produce a 400. An empty body reports `Request body is not JSON`, which is the message for that one case and not a content-type complaint.
 
 ```rust
 use toni::extractors::Json;
@@ -115,6 +122,8 @@ fn create(&self, Body(dto): Body<CreateUserDto>) -> HttpResponse {
 
 Use `Json` when the endpoint only accepts JSON. Use `Body` when it also needs to support form submissions.
 
+Two different types are spelled `Body`: `toni::extractors::Body<T>` is this extractor, and `toni::Body` is the response body a handler returns. A handler that takes one and returns the other needs an alias on one of the imports — `use toni::Body as ToniBody;` — or two `use` statements naming the same identifier collide.
+
 ## Bytes — raw binary data
 
 Buffers the entire request body into a `Vec<u8>`:
@@ -137,12 +146,12 @@ Yields the body as a raw stream of chunks, never loading it into memory at once.
 
 ```rust
 use futures::StreamExt;
-use toni::BodyStream;
+use toni::{Body, BodyStream};
 
 #[post("/upload")]
 async fn upload(&self, stream: BodyStream) -> Body {
     let mut total = 0usize;
-    let mut s = stream.into_stream();
+    let mut s = Box::pin(stream.into_stream());
     while let Some(chunk) = s.next().await {
         total += chunk.unwrap().len();
     }
@@ -150,9 +159,11 @@ async fn upload(&self, stream: BodyStream) -> Body {
 }
 ```
 
-`into_stream()` yields `Result<bytes::Bytes, _>` chunks. `collect().await` buffers the whole body into a single `Bytes` instead — use it when a code path turns out not to need streaming.
+`into_stream()` yields `Result<bytes::Bytes, _>` chunks. The stream it returns is not `Unpin`, so pin it — `Box::pin` above — before polling it with `next()`. `collect().await` buffers the whole body into a single `Bytes` and needs no pinning; reach for it when a code path turns out not to need streaming.
 
-Extraction itself cannot fail on `BodyStream`'s own terms — its error type is `BodyExtractionError<Infallible>`, so the only possible failure is finding the body already read by another extractor. An adapter that buffers request bodies still yields a `BodyStream`; the buffered bytes are wrapped as a single-chunk stream rather than rejected.
+Extraction itself cannot fail on `BodyStream`'s own terms — its error type is `BodyExtractionError<Infallible>`, so the only possible failure is finding the body already read by another extractor.
+
+`toni-actix` and `toni-rocket` hand the framework a body that is already buffered. `BodyStream` and `Multipart` still work there, with the bytes wrapped as a single-chunk stream — but nothing is incremental, and the memory is spent before the handler runs. Stream on `toni-axum`, `toni-salvo`, or `toni-poem`.
 
 ## Multipart — form-data and file uploads
 
@@ -203,6 +214,8 @@ fn me(&self, ext: Extensions) -> Body {
     }
 }
 ```
+
+The bag is behind a lock, so `get::<T>()` returns a clone and needs `T: Clone + Send + Sync + 'static`. For a payload that cannot clone, `with::<T, _>(|v| …)` and `with_mut` run a closure against the value in place instead, holding the lock for the duration — don't reach back into the same bag from inside one.
 
 Unlike the other extractors on this page, `Extensions` is not HTTP-specific — its one impl is generic over every handler context, so the same parameter means the same thing in a WebSocket or RPC handler.
 
@@ -255,13 +268,14 @@ fn create(&self, Validated(Json(dto)): Validated<Json<CreateUserDto>>) -> HttpRe
 }
 ```
 
-`Validated` works with any extractor implementing `ValidatableExtractor` — provided for `Json`, `Path`, `Query`, and `Body`:
+`Validated` works with any extractor implementing `ValidatableExtractor` — provided for `Json`, `Path`, `Query`, `Body`, and `Payload`:
 
 ```rust
-Validated<Json<Dto>>    // validate JSON body
-Validated<Path<Dto>>    // validate path params
-Validated<Query<Dto>>   // validate query params
-Validated<Body<Dto>>    // validate content-type-aware body
+Validated<Json<Dto>>     // validate JSON body
+Validated<Path<Dto>>     // validate path params
+Validated<Query<Dto>>    // validate query params
+Validated<Body<Dto>>     // validate content-type-aware body
+Validated<Payload<Dto>>  // validate a WebSocket, RPC, or gRPC message
 ```
 
 `Validated<E>` reads exactly what `E` reads. `Validated<Query<T>>` is a metadata extractor and leaves the body alone, so it can sit beside a body extractor on the same handler; `Validated<Json<T>>` counts as that handler's body reader:
@@ -279,6 +293,24 @@ fn search(
 ```
 
 A validation failure returns the same 400 shape as any other extraction failure, with the rule violations in `details`. To make a custom extractor validatable, see [Custom Extractors](/docs/extractors/custom#validation-support).
+
+`Validated<E>` is generic over the context, not tied to HTTP: its impl reads `E: FromContext<C> + ValidatableExtractor` for any handler context `C`. `Validated<Payload<T>>` is therefore the same wrapper in a `#[subscribe_message]`, `#[message_pattern]`, or `#[grpc_method]` handler, validating the message the transport delivered:
+
+```rust
+use toni::extractors::{Payload, Validated};
+use toni::{RpcData, RpcError};
+
+#[message_pattern("users.create")]
+async fn create_user(
+    &self,
+    Validated(Payload(dto)): Validated<Payload<CreateUserDto>>,
+) -> Result<RpcData, RpcError> {
+    // dto satisfied every #[validate] rule before this line
+    Ok(RpcData::json(serde_json::json!({ "email": dto.email })))
+}
+```
+
+Which inner extractors are available still depends on the transport — `Validated<Query<T>>` has no meaning off HTTP, and asking for it there is a trait-bound error.
 
 ## Extraction failures
 
@@ -319,4 +351,4 @@ fn update(
 
 ## Custom extractors
 
-Implement `FromContext` to create your own — a metadata extractor borrows `ctx.request()`, a body extractor calls `take_body`. See [Custom Extractors](/docs/extractors/custom).
+Implement `FromContext` to create your own — a metadata extractor borrows `ctx.request()`; a body extractor calls `take_body` and declares `const CONSUMES: bool = true` so the one-body check covers it. See [Custom Extractors](/docs/extractors/custom).
