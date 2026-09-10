@@ -28,7 +28,24 @@ impl UsersService {
 }
 ```
 
-`#[injectable]` goes directly on the struct; the `impl` block is standard Rust. `#[default(expr)]` initializes owned state; untagged fields fall back to `Default::default()`. The macro supplies the `Clone` impl the container needs.
+`#[injectable]` goes directly on the struct; the `impl` block is standard Rust. `#[default(expr)]` initializes owned state; untagged fields fall back to `Default::default()`. The macro supplies the `Clone` impl the container needs — every injection site binds an owned clone, never a shared reference.
+
+`#[controller]` does not derive `Clone`, because a dispatch target is not a provider: the framework builds it and calls it, and nothing resolves it by type. Naming one as a dependency therefore fails at the field:
+
+```
+error[E0277]: the trait bound `UsersController: Clone` is not satisfied
+19 | #[injectable]
+   | ------------- in this attribute macro expansion
+22 |     ctrl: UsersController,
+   |     ^^^^^^^^^^^^^^^^^^^^^ the trait `Clone` is not implemented for `UsersController`
+   = note: this error originates in the derive macro `Clone` which comes from the expansion of
+           the attribute macro `injectable`
+help: consider annotating `UsersController` with `#[derive(Clone)]`
+```
+
+<Callout type="warn" title="Do not take that help">
+Deriving `Clone` on the controller silences the error and leaves the dependency unresolvable — the container has no entry under the controller's type. Inject the service the controller injects instead, and let both sites share it.
+</Callout>
 
 ## Injecting into other services
 
@@ -130,14 +147,14 @@ Providers are singletons by default — one instance per module scope. `#[inject
 ```
 
 <Callout type="info" title="Request scope means one execution">
-An execution is one HTTP request, one WebSocket message, one RPC or gRPC call, or one standalone execution built with `ProviderContext::standalone()`. Within an execution the instance is shared by clone — one construction, cloned into every injection site — so mutable state that must be visible across sites belongs behind an `Arc<Mutex<_>>`. Request-scoped providers cannot carry lifecycle hooks; declaring one is a compile error.
+An execution is one HTTP request, one WebSocket message, one RPC or gRPC call, or one standalone execution built with `ProviderContext::standalone()`. Within an execution the instance is shared by clone — one construction, cloned into every injection site — so mutable state that must be visible across sites belongs behind an `Arc<Mutex<_>>`. A lifecycle hook declared on a request- or transient-scoped provider is never called: the framework has no firing point for one, and the only signal is a `dead_code` warning on the hook method. Put hooks on a singleton.
 </Callout>
 
-A singleton dispatch target — an HTTP controller, an RPC controller, or a gRPC service — that depends on a request-scoped provider is elevated to request scope automatically, and a warning is logged when it happens. See [Provider Patterns](/docs/core-concepts/provider-patterns) for value providers, factory providers, alias providers, and custom token providers.
+A singleton dispatch target — an HTTP controller, an RPC controller, or a gRPC service — that depends on a request-scoped provider is elevated to request scope automatically, and a warning is logged when it happens. Declaring `#[controller(scope = "request")]` states the intent and silences the warning. See [Provider Patterns](/docs/core-concepts/provider-patterns) for value providers, factory providers, alias providers, and custom token providers.
 
 ## Implementing enhancer traits
 
-An enhancer is a provider that implements the role trait — the trait impl *is* the declaration. There are no marker attributes: declare `#[injectable]`, implement `Guard<HttpContext>` (or `Interceptor`, `Pipe`, `ErrorHandler`, `Middleware`), register in `providers`, and apply with `#[use_guards]`. `Interceptor` and `ErrorHandler` also carry the transport's answer type — `Interceptor<HttpContext, HttpResponse>` for HTTP:
+An enhancer is a provider that implements the role trait — the trait impl *is* the declaration. There are no marker attributes: declare `#[injectable]`, implement `Guard<HttpContext>` (or `Interceptor`, `ErrorHandler`, `Middleware`), register in `providers`, and apply with `#[use_guards]`. `Interceptor` and `ErrorHandler` also carry the transport's answer type — `Interceptor<HttpContext, HttpResponse>` for HTTP:
 
 ```rust
 use toni::{async_trait, injectable, context::HttpContext, traits_helpers::Guard};

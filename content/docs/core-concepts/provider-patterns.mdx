@@ -52,6 +52,8 @@ pub struct AppInfo {
 
 When no token is specified, `#[inject]` resolves by the field's type. The `#[inject("TOKEN")]` form resolves by the explicit token string.
 
+The value must be `Clone`: the container holds one and hands each injection site a clone. Wrap what is not — `Arc<Logger>` is `Clone` whatever `Logger` is.
+
 ## Factory providers
 
 Run a closure to produce a value, with optional dependencies:
@@ -79,7 +81,15 @@ Run a closure to produce a value, with optional dependencies:
 pub struct AppModule;
 ```
 
-Dependencies listed in the closure signature are resolved from the module's DI scope before the factory runs.
+Dependencies listed in the closure signature are resolved from the module's DI scope before the factory runs. The value the factory produces must be `Clone`, for the reason a value provider's must: the container runs the closure once at startup and clones the result into every injection site. A non-`Clone` product fails with ``the trait bound `Logger: Clone` is not satisfied``, pointed at the whole macro call and offering a `help:` that names a generated `__ToniFactoryProvider_*` type rather than the fix — which is to produce an `Arc<Logger>`.
+
+A scope changes that, and goes after the closure:
+
+```rust
+provider_factory!("REQUEST_STARTED_AT", || std::time::Instant::now(), scope = "request")
+```
+
+`scope = "request"` and `scope = "transient"` both run the closure when the value is asked for rather than once at startup, so the produced value carries no `Clone` requirement. A request-scoped one is refused outside an execution, with the error naming `resolve` and `ProviderContext::standalone()`.
 
 ## Alias providers
 
@@ -167,7 +177,7 @@ pub struct PluginRegistry {
 }
 ```
 
-`multi(Plugin)` is shorthand for `multi(dyn Plugin + Send + Sync)`. Contributions can be type paths, factory closures, or `existing(...)` references; a token with no contributions injects an empty `Vec`.
+`multi(Plugin)` is shorthand for `multi(dyn Plugin + Send + Sync)`. Contributions can be type paths, factory closures, or `existing(...)` references. The collection exists only where something contributes to it: a token nothing contributes to is not registered at all, and injecting it fails startup like any other missing provider.
 
 ## Exporting custom-token providers
 
@@ -185,7 +195,79 @@ String-token providers are exported from a [dynamic module](/docs/core-concepts/
 
 ```rust
 DynamicModule::builder("ConfigModule")
-    .provider(/* value provider factory */)
+    .provider(DbUrlFactory::new(std::env::var("DATABASE_URL")?))
     .export_token("DB_URL")
     .build()
 ```
+
+`DbUrlFactory` is a `ProviderFactory` — the value `.provider()` takes, and what the macros on this page generate. Writing one directly is the next section.
+
+## Writing a provider by hand
+
+The macros cover a value, a computed value, an alias and a renamed type. Below them are two traits, and a module builds on them directly when the construction cannot be spelled as a closure — a resource that needs a shutdown hook, a token chosen at runtime, an integration crate's `for_root`.
+
+The split is between building and answering. A **`ProviderFactory`** runs once during the scan and produces a **`Provider`**, which answers every resolution afterwards:
+
+```rust
+use std::any::Any;
+use std::sync::Arc;
+
+use toni::{FxHashMap, async_trait};
+use toni::traits_helpers::{Injectable, Provider, ProviderContext, ProviderFactory};
+
+pub struct DbUrlFactory {
+    url: String,
+}
+
+impl DbUrlFactory {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self { url: url.into() }
+    }
+}
+
+#[async_trait]
+impl ProviderFactory for DbUrlFactory {
+    fn get_token(&self) -> String {
+        "DB_URL".to_string()
+    }
+
+    // Folded into the identity of the DynamicModule carrying this factory, so two
+    // modules configured with different URLs stay distinct instead of colliding.
+    fn identity_hint(&self) -> Option<String> {
+        Some(self.url.clone())
+    }
+
+    async fn build(&self, _deps: FxHashMap<String, Injectable>) -> Injectable {
+        let provider = DbUrlProvider { url: self.url.clone() };
+        Injectable::new(Arc::new(Box::new(provider)), vec![])
+    }
+}
+
+struct DbUrlProvider {
+    url: String,
+}
+
+#[async_trait]
+impl Provider for DbUrlProvider {
+    fn get_token(&self) -> String {
+        "DB_URL".to_string()
+    }
+
+    async fn execute(
+        &self,
+        _params: Vec<Box<dyn Any + Send>>,
+        _ctx: ProviderContext,
+    ) -> Box<dyn Any + Send> {
+        Box::new(self.url.clone())
+    }
+}
+```
+
+Four things to know before writing one:
+
+- **Both `get_token`s answer the same string.** The factory's token is what the module registers and what the dependency graph orders by; the instance it builds is filed under the provider's. Where the two disagree, nothing resolves.
+- **`execute` returns `Box<dyn Any + Send>`, and the injection site downcasts it.** The boxed value has to be exactly the type the field declares — `String` here, not `&str` and not `Arc<String>` — because a mismatch surfaces as a failed downcast at resolution, not as a compile error.
+- **Dependencies come through `get_dependencies`.** Return the tokens this factory needs and they arrive in `build`'s `deps` map, keyed by the same strings. The default is an empty list.
+- **The `Vec` beside the provider is its role registrations.** Empty for a plain value; a provider that also implements `Guard` or `Interceptor` lists those roles so the enhancer registries find it. `#[injectable]` fills it from the trait impls it can see.
+
+`Provider` also carries the five lifecycle hooks as defaulted no-ops. Overriding `on_module_init` is how an integration turns an unreachable server into a startup failure, and `on_application_shutdown` is where a pool is closed — the hooks a `provider_value!` or `provider_factory!` registration cannot reach.

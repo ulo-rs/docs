@@ -24,7 +24,7 @@ pub struct UsersModule;
 
 The `#[module]` macro transforms this struct into a full module definition. You don't write methods on the struct — the macro generates everything needed for the DI scanner.
 
-`controllers:` takes every dispatch target, not only HTTP: `#[rpc_controller]` and `#[grpc_service]` types are declared there the same way, while WebSocket gateways stay in `providers:`.
+`controllers:` takes every dispatch target, not only HTTP. All three are `#[controller]` structs; the handler impl names the transport — `#[routes]` for HTTP, `#[patterns]` for RPC, `#[grpc_methods(proto::Trait)]` for gRPC. WebSocket gateways stay in `providers:`.
 
 ```rust
 #[module(
@@ -33,6 +33,8 @@ The `#[module]` macro transforms this struct into a full module definition. You 
 )]
 pub struct UsersModule;
 ```
+
+A `#[controller]` with no handler impl is valid; it dispatches nothing.
 
 ## Imports and exports
 
@@ -55,6 +57,8 @@ pub struct UsersModule;
 ```
 
 `exports` lists providers from this module's `providers` by type name. Only exported providers are visible outside the module; everything else is private to that module's scope.
+
+`controllers:` and `exports:` take a bare name, not a path: `exports: [inner::Svc]` fails to parse with ``error: expected `,` `` at the first `::`. `use` the type and list its name. `providers:` does take a path, and also takes the provider macros.
 
 ## The module tree
 
@@ -187,4 +191,67 @@ The builder's `export::<T>()` exports by type, `export_token("NAME")` exports a 
 
 A dynamic module's identity is its builder name plus the configuration of its providers. Importing the same module twice — say two feature modules each list `SeaOrmModule::for_root("postgres://localhost/app")` — registers it once; the second import dedups.
 
+An identity renders as `base` on its own, or `base#<16 hex digits>` once configuration is folded in. That rendered key is the module's public address: the registry token, the `Display` string, the name in the scan log and in a clash refusal, and the argument [`get_module_by_id`](/docs/core-concepts/dependency-injection#scoping-a-lookup-to-one-module) takes. For a `#[module]` struct the base is the fully-qualified type path; for a `DynamicModule` it is the string the builder was given.
+
 Two calls with **different** configuration are different modules. If both export the same token (two unnamed `for_root` calls of one integration), startup is refused with an error naming both modules; one would shadow the other and nothing would report it. Integrations expose named constructors (`for_root_named`) for this; a custom multi-instance module opts into the same identity machinery by implementing `identity_hint()` on its `ProviderFactory`, returning a string that distinguishes one configuration from another.
+
+## Implementing `ModuleMetadata` by hand
+
+`#[module]` and `DynamicModule` both produce a `ModuleMetadata` implementation. Writing one directly is the third option, and the one to reach for when a module has to answer differently depending on what it was constructed with — a different identity, a different provider set, a conditional export.
+
+The trait is five required methods plus defaulted ones:
+
+```rust
+use toni::ModuleIdentity;
+use toni::traits_helpers::{ControllerFactory, ModuleMetadata, ProviderFactory};
+
+pub struct MetricsModule {
+    endpoint: String,
+}
+
+impl MetricsModule {
+    pub fn for_root(endpoint: impl Into<String>) -> Self {
+        Self { endpoint: endpoint.into() }
+    }
+}
+
+impl ModuleMetadata for MetricsModule {
+    fn identity(&self) -> ModuleIdentity {
+        // Two endpoints are two modules; the same endpoint imported twice dedups.
+        ModuleIdentity::named("MetricsModule").fingerprinted(&self.endpoint)
+    }
+
+    fn is_global(&self) -> bool {
+        true
+    }
+
+    fn imports(&self) -> Option<Vec<Box<dyn ModuleMetadata>>> {
+        None
+    }
+
+    fn controllers(&self) -> Option<Vec<Box<dyn ControllerFactory>>> {
+        None
+    }
+
+    fn providers(&self) -> Option<Vec<Box<dyn ProviderFactory>>> {
+        Some(vec![Box::new(MetricsSinkFactory::new(&self.endpoint))])
+    }
+
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec![toni::di::token_of::<MetricsSink>()])
+    }
+}
+```
+
+Import it like any other module — the expression in `imports:` is the module value itself:
+
+```rust
+#[module(imports: [MetricsModule::for_root("http://collector:4317"), UsersModule])]
+pub struct AppModule;
+```
+
+Two details are easy to get wrong. Exports are **tokens**, not types, so build them with `token_of::<T>()` rather than formatting a name by hand — that is the function registration uses, and the two sides agree only because they share it. And the trait is declared `#[async_trait(?Send)]` for the sake of its lifecycle hooks: a plain `impl` is enough while you override none of them, and the attribute goes on the impl block the moment you override one.
+
+`ModuleIdentity::named` is for a module identified by a string. A module identified by its own type uses `ModuleIdentity::of_type::<Self>()`, which derives the base from `token_of::<Self>()`; `.fingerprinted(&config)` then folds configuration into either form.
+
+The providers a module hands back are `ProviderFactory` values — see [writing a provider factory by hand](/docs/core-concepts/provider-patterns#writing-a-provider-by-hand).

@@ -6,7 +6,7 @@ description: Run code at specific points in the application and module lifecycle
 Lifecycle hooks are methods on providers, controllers, and modules that Toni calls at specific points during application startup and shutdown. They're declared with attribute macros inside `impl` blocks. All hooks are `async fn` taking `&self`; the two startup hooks return `toni::InitResult`, and returning `Err` aborts startup. The two fail from different phases: an `on_module_init` failure surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create`, an `on_application_bootstrap` failure from `bind()`.
 
 <Callout type="warn">
-Hooks are only supported on **singleton-scoped** providers. Request- and transient-scoped instances don't exist at application init or shutdown, so declaring a hook on one is a compile error.
+Hooks fire only on **singleton** providers. Request- and transient-scoped instances do not exist at application init or shutdown, so there is no firing point for one. Declared on such a provider a hook compiles and is never called — the only signal is a `dead_code` warning on the method.
 </Callout>
 
 ## Available hooks
@@ -158,7 +158,7 @@ impl CacheModule {
 }
 ```
 
-Controllers accept the same hooks inside their impl blocks. On a request-scoped controller, the init and bootstrap hooks fire on each per-call instance rather than once at startup.
+Controllers accept the same hooks inside their impl blocks. On a request-scoped controller, the init and bootstrap hooks fire on each per-call instance rather than once at startup, and their `Err` is discarded — a failed init does not stop the call. The three shutdown hooks do not fire on a per-call target at all; they run only on a singleton one, which is the only instance still alive when the application shuts down.
 
 ## Triggering shutdown
 

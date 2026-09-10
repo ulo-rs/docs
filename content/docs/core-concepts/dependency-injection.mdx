@@ -19,7 +19,9 @@ Any failure in this phase — a missing provider, a circular dependency — come
 
 ## Provider tokens
 
-Every provider is identified by a **token**. The default token is the fully-qualified type name (`std::any::type_name`) — when you write `providers: [UsersService]`, the token is something like `"my_app::users::UsersService"`, and that's the string you'll see in resolution errors. An untagged `#[inject]` field resolves by its type's token; `#[inject("TOKEN")]` resolves by an explicit string token.
+Every provider is identified by a **token**. The default token is the fully-qualified type name, and one function produces it: `toni::di::token_of::<T>()`. When you write `providers: [UsersService]`, the token is something like `"my_app::users::UsersService"`, and that's the string you'll see in resolution errors. An untagged `#[inject]` field resolves by its type's token; `#[inject("TOKEN")]` resolves by an explicit string token.
+
+Registration, injection, `resolve`, exports and library provider factories all go through `token_of`, so the two sides of a lookup are canonicalized the same way and the written spelling of a type stops mattering. `PgPool`, `Pool<Postgres>` and `my_db::Pool<Postgres>` produce one token: a generic handle registered under one spelling injects under whichever spelling is convenient at the field.
 
 Custom tokens let you register multiple providers of the same type under different names, or register non-struct values:
 
@@ -61,18 +63,50 @@ After the application is created, you can pull instances directly from the conta
 ```rust
 let app = ToniFactory::create(AppModule).await?;
 
-// Get by type, searching all modules
+// By type, searching every module
 let users_service = app.get::<UsersService>().await?;
 
-// Get by type from a specific module
-let service = app.get_from::<UsersService>("UsersModule").await?;
-
-// Get by custom token
+// By custom token
 let db_pool = app.get_by_token::<Pool>("DB_POOL").await?;
-
-// Get by custom token from a specific module
-let db_pool = app.get_from_by_token::<Pool>("AppModule", "DB_POOL").await?;
 ```
+
+A `Token<T>` const carries the result type with the name, so the turbofish falls away and asking for the wrong type is a compile error rather than a downcast failure at runtime:
+
+```rust
+use toni::di::Token;
+
+pub const APP_NAME: Token<String> = Token::new("APP_NAME");
+
+// `String` is inferred from the const
+let name = app.get_by_token(APP_NAME).await?;
+```
+
+### Scoping a lookup to one module
+
+`get` searches every module. To resolve inside one module's scope — the way an injected `ModuleRef` does from inside it — take a handle to the module first:
+
+```rust
+let module = app.get_module::<UsersModule>().await?;
+let service = module.get::<UsersService>().await?;
+```
+
+`get_module::<M>()` matches on the module's [identity base](/docs/core-concepts/modules#identity-and-deduplication) — `token_of::<M>()`, fingerprinted or not.
+
+`get_module_by_id` takes an identity instead of a type, which is what reaches a module that has no type to name: a `DynamicModule`'s base is the name its builder was given, so `SeaOrmModule::for_root(url)` is reached as `get_module_by_id("SeaOrmModule")`. A `#[module]` struct's base is its fully-qualified path, so `"UsersModule"` finds nothing there — pass `toni::di::token_of::<UsersModule>()`, or use `get_module::<UsersModule>()` and skip the string.
+
+Two configurations of one maker share a base and differ by fingerprint, so the bare base is ambiguous and the error lists the full keys:
+
+```
+Module identity 'SeaOrmModule' is ambiguous: ["SeaOrmModule#3f2a1c94b7e05d68", "SeaOrmModule#c081be47a25d9f13"] share the base. Pass one full key to `get_module_by_id`.
+```
+
+Passing one of those keys addresses that one module:
+
+```rust
+let primary = app.get_module_by_id("SeaOrmModule#3f2a1c94b7e05d68").await?;
+```
+
+A fingerprint is deterministic within one build, not across toolchains — read it out of an error to find a module during debugging, don't commit it. Both methods exist on `ToniApplication` and on `ToniApplicationContext`.
 
 ## Standalone application context
 
@@ -179,16 +213,16 @@ A cycle that spans two modules is invisible to the per-module sort. The loader d
 
 ```
 Circular dependency detected between providers:
-    my_app::services::ServiceA (in module ModuleA)
-    -> my_app::services::ServiceB (in module ModuleB)
+    my_app::services::ServiceA (in module my_app::modules::ModuleA)
+    -> my_app::services::ServiceB (in module my_app::modules::ModuleB)
 A provider cannot be built before a provider it depends on. Break the cycle: extract the shared logic into a third provider both depend on, or inject `ModuleRef` into one side and resolve the other lazily at call time.
 ```
 
 When instantiation stalls without a cycle, the message says so — that diagnosis points at a missing or unexported provider, not a cycle:
 
 ```
-Cannot resolve dependencies for modules: ["ModuleA"]. No provider cycle was found, so a required provider is missing or not exported by an imported module:
-    - ModuleA: DEFERRED: Global provider 'my_app::services::MailService' not yet instantiated for module 'ModuleA'
+Cannot resolve dependencies for modules: ["my_app::modules::ModuleA"]. No provider cycle was found, so a required provider is missing or not exported by an imported module:
+    - my_app::modules::ModuleA: DEFERRED: Global provider 'my_app::services::MailService' not yet instantiated for module 'my_app::modules::ModuleA'
 ```
 
 A cycle message always points to a genuine construction cycle.
