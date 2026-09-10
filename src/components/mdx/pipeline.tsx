@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
  *
  * A linear diagram has to split interceptors into "before" and "after" steps,
  * which hides the thing worth knowing: middleware and interceptors *wrap* the
- * handler and see the response, while guards and pipes run on the way in only.
+ * handler and see the response, while guards run on the way in only.
  * Nesting says that without a caption.
  */
 
@@ -43,12 +43,6 @@ const PIPELINE: Layer = {
           label: "Interceptors",
           note: "next.run(ctx) — consumed once, both sides",
           children: [
-            {
-              kind: "step",
-              id: "pipes",
-              label: "Pipes",
-              note: "sync — Some(response) answers and skips the rest",
-            },
             {
               kind: "step",
               id: "handler",
@@ -175,7 +169,7 @@ export function RequestPipeline() {
         width="100%"
         style={{ minWidth: 560, fontFamily: "inherit" }}
         role="img"
-        aria-label="The HTTP request pipeline. Global middleware wraps route resolution and everything after it. Module middleware wraps guards, interceptors, pipes, and the handler. Interceptors wrap pipes and the handler and see the response on the way out."
+        aria-label="The HTTP request pipeline. Global middleware wraps route resolution and everything after it. Module middleware wraps guards, interceptors, and the handler. Interceptors wrap the handler and see the response on the way out."
       >
         <defs>
           <marker
@@ -240,8 +234,7 @@ export function RequestPipeline() {
           fontSize="11.5"
           fill="var(--color-fd-muted-foreground)"
         >
-          On error, observers fan out first; then handlers claim it method →
-          controller → global.
+          On error, handlers claim it method → controller → global.
         </text>
       </svg>
     </figure>

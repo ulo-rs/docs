@@ -5,7 +5,9 @@ description: Interceptors wrap route handlers — they run before and after, and
 
 An interceptor wraps a route handler and returns the answer. `next.run(context).await` yields whatever the handler (and any inner interceptors) produced; the interceptor's own return value is what goes out. Transform the returned value, replace it, or return one without calling `next.run` at all — the short-circuit for caching, circuit breakers, and canned responses.
 
-Like guards and pipes, interceptors are generic over the per-request context and the transport's answer type `R`: `Interceptor<HttpContext, HttpResponse>` runs on HTTP routes, `Interceptor<RpcContext, RpcHandlerResult>` on RPC patterns (`Result<Option<RpcData>, RpcError>`), `Interceptor<WsContext, WsHandlerResult>` on WebSocket messages (`Result<WsHandlerOutput, WsError>`), `Interceptor<GrpcContext, GrpcHandlerResult>` on gRPC methods (`Result<(), GrpcStatus>`).
+Like guards, interceptors are generic over the per-request context and the transport's answer type `R`: `Interceptor<HttpContext, HttpResponse>` runs on HTTP routes, `Interceptor<RpcContext, RpcHandlerResult>` on RPC patterns (`Result<RpcHandlerOutput, RpcError>`), `Interceptor<WsContext, WsHandlerResult>` on WebSocket messages (`Result<WsHandlerOutput, WsError>`), `Interceptor<GrpcContext, GrpcHandlerResult>` on gRPC methods (`Result<(), GrpcStatus>`).
+
+On RPC, an interceptor that builds its own answer rather than forwarding one names the shape: `Ok(RpcHandlerOutput::Single(data))` for one reply, `Ok(RpcHandlerOutput::Empty)` for none, `Ok(RpcHandlerOutput::Stream(s))` for a sequence.
 
 ## The Interceptor trait
 
@@ -115,7 +117,7 @@ impl Interceptor<HttpContext, HttpResponse> for CacheHeaderInterceptor {
 
 ## Short-circuiting
 
-Returning without calling `next.run` skips everything downstream — inner interceptors, pipes, and the handler — and the interceptor's own value is the answer:
+Returning without calling `next.run` skips everything downstream — inner interceptors and the handler — and the interceptor's own value is the answer:
 
 ```rust
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -242,15 +244,17 @@ let mut factory = ToniFactory::new();
 factory.use_global_http_interceptors(Arc::new(TimingInterceptor));
 ```
 
-`use_global_rpc_interceptors` and `use_global_ws_interceptors` register for the other transports; each takes an `Arc<dyn Interceptor<C, R>>` for the matching context and answer type.
+`use_global_rpc_interceptors`, `use_global_ws_interceptors`, and `use_global_grpc_interceptors` register for the other transports; each takes an `Arc<dyn Interceptor<C, R>>` for the matching context and answer type.
 
 ## Execution order
 
 Interceptors nest as onion layers, global outermost, method innermost:
 
 ```
-Global (before) → Controller (before) → Method (before) → Pipes → Handler
+Global (before) → Controller (before) → Method (before) → Handler
 Handler → Method (after) → Controller (after) → Global (after)
 ```
 
-A panic inside an interceptor is caught by the framework and routed through the error pipeline instead of tearing down the request — see [Error Handling](/docs/request-lifecycle/error-handling).
+Extractors resolve inside the handler, after the innermost interceptor has called `next.run`.
+
+A panic inside an interceptor is caught by the framework and routed through the error pipeline instead of tearing down the request. The event is `PanicRecovered { during: PipelineSegment::Middleware }` — interceptors and middleware chain steps share one segment, so an interceptor panic reads back as `middleware` in a `#[catch(PanicRecovered)]` handler and in the logs. See [Error Handling](/docs/request-lifecycle/error-handling).

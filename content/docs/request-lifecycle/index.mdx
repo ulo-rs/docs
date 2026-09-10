@@ -1,6 +1,6 @@
 ---
 title: Request Lifecycle
-description: How a request moves through middleware, guards, interceptors, pipes, the handler, and back.
+description: How a request moves through middleware, guards, interceptors, the handler, and back.
 ---
 
 Every request travels through a predictable sequence of processing layers before the route handler runs, and through a symmetric sequence on the way back out.
@@ -9,27 +9,26 @@ Every request travels through a predictable sequence of processing layers before
 
 <RequestPipeline />
 
-Middleware and interceptors wrap what is inside them and see the response on the way out. Guards and pipes run on the way in only.
+Middleware and interceptors wrap what is inside them and see the response on the way out. Guards run on the way in only.
 
 ## Layer responsibilities
 
 | Layer | Runs when | Can block? | Has response access? |
 |-------|-----------|-----------|----------------------|
 | Middleware | Global: before routing. Route-scoped: after routing | Yes (return a response or `Err`) | Yes (after `next.run()`) |
-| Guards | Before interceptors and handler | Yes (return `false` → 403) | No |
+| Guards | Before interceptors and handler | Yes (return `false`) | No |
 | Interceptors | Around handler | Yes (skip calling `next.run`) | Yes (both sides) |
-| Pipes | After interceptors, before handler | Yes (return `Some(response)`) | Only what they return |
-| Error handlers | On errors and framework events | — | Produce the response |
+| Error handlers | On a handler error, a guard rejection, a middleware `Err`, a caught panic, or a call nothing routes | — | Produce the response |
 
 ## Contexts and transports
 
-Enhancers are generic over the per-request context. `Guard<HttpContext>` runs on HTTP routes; `Guard<RpcContext>`, `Guard<WsContext>`, and `Guard<GrpcContext>` run on RPC, WebSocket, and gRPC. The same struct can implement a trait for several contexts and serve all of those transports. Interceptors, pipes, and error handlers follow the same pattern (gRPC runs guards, interceptors, and error handlers, but not pipes).
+Enhancers are generic over the per-request context. `Guard<HttpContext>` runs on HTTP routes; `Guard<RpcContext>`, `Guard<WsContext>`, and `Guard<GrpcContext>` run on RPC, WebSocket, and gRPC. The same struct can implement a trait for several contexts and serve all of those transports. Interceptors and error handlers follow the same pattern; all three roles run on all four transports.
 
 ## Scope levels
 
-Guards, interceptors, and pipes apply at three scopes, in execution order:
+Guards, interceptors, and error handlers apply at three scopes, in execution order:
 
-1. **Global** — registered per transport on `ToniFactory` (`use_global_http_guards`, `use_global_rpc_pipes`, `use_global_ws_interceptors`, ...)
+1. **Global** — registered per transport on `ToniFactory`. Guards and interceptors take `use_global_{http,rpc,ws,grpc}_{guards,interceptors}`; error handlers take `use_global_{http,rpc,ws,grpc}_error_handler`. Middleware has a single global registration, `use_global_middleware`, because it is HTTP-only.
 2. **Controller** — `#[use_guards]` etc. on the `#[routes]` impl block (or `#[patterns]` / `#[subscriptions]` / `#[grpc_methods]`), applies to every handler in it
 3. **Method** — the same attributes on a specific handler
 
@@ -41,6 +40,5 @@ All levels run, in that order. Method-level runs *in addition to* controller-lev
   <Card title="Middleware" href="/docs/request-lifecycle/middleware" description="Wrapping requests before and after routing, route patterns, and Tower layers." />
   <Card title="Guards" href="/docs/request-lifecycle/guards" description="Authorization checks that answer true or false, and what a rejection produces." />
   <Card title="Interceptors" href="/docs/request-lifecycle/interceptors" description="Logic wrapped around the handler that can transform the response or skip it." />
-  <Card title="Pipes" href="/docs/request-lifecycle/pipes" description="Synchronous checks that run after interceptors and can answer the request outright." />
-  <Card title="Error Handling" href="/docs/request-lifecycle/error-handling" description="Domain errors, the #[catch] chain, observers, framework events, and panic recovery." />
+  <Card title="Error Handling" href="/docs/request-lifecycle/error-handling" description="Domain errors, the #[catch] chain, framework events, and panic recovery." />
 </Cards>

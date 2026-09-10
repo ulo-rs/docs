@@ -1,14 +1,14 @@
 ---
 title: Error Handling
-description: Domain errors with toni::Error, canonical envelopes, the #[catch] handler chain, observers, and panic recovery.
+description: "Domain errors with toni::Error, canonical envelopes, the #[catch] handler chain, framework events, and panic recovery."
 ---
 
 Toni's error story has four layers, from most common to most specialized:
 
 1. **Domain errors** — implement `toni::Error` on your own types, return `Result<T, MyError>` from handlers, and the framework renders a canonical response with the right status on every transport.
 2. **`HttpError`** — a convenience type for trivial cases that don't warrant a dedicated error.
-3. **The error handler chain** — `#[catch(T)]` functions and `ErrorHandler` implementations that reshape specific errors into custom responses.
-4. **Observers and panic recovery** — a fire-and-forget tap for logging/metrics, and `catch_unwind` around every pipeline segment so a panic never tears down the server.
+3. **The error handler chain** — `#[catch(T)]` functions and `ErrorHandler` implementations that reshape specific errors into custom responses. The chain is the only error seam there is: handler errors and the framework's own events both travel it.
+4. **Panic recovery** — `catch_unwind` around every pipeline segment, so a panic becomes a typed event on that same chain instead of tearing down the server.
 
 ## Domain errors with `toni::Error`
 
@@ -186,14 +186,14 @@ async fn render_payment_declined(err: &PaymentDeclined, _ctx: &HttpContext) -> H
 }
 ```
 
-`#[catch(T)]` lowers a free `async fn (err: &T, ctx: &CtxType) -> ResponseType` into an `ErrorHandler` that downcasts the inbound error to `T` — non-matching errors fall through to the next handler. The function name becomes a unit struct, registered like any handler:
+`#[catch(T)]` lowers a free `async fn (err: &T, ctx: &CtxType) -> ResponseType` into an `ErrorHandler` that downcasts the inbound error to `T` — non-matching errors fall through to the next handler. The function name becomes a unit struct. It is a value, not a provider, so attach it by instantiating it — `Name {}` — rather than by bare name, which asks the container for a token nothing registered:
 
 ```rust
 #[controller("/billing")]
 pub struct BillingController {}
 
 #[routes]
-#[use_error_handlers(render_payment_declined)]
+#[use_error_handlers(render_payment_declined {})]
 impl BillingController {
     #[post("/charge")]
     fn charge(&self) -> Result<Body, PaymentDeclined> {
@@ -202,7 +202,7 @@ impl BillingController {
 }
 ```
 
-The context parameter picks the transport: `&HttpContext` returning `HttpResponse` for HTTP, `&RpcContext` returning `RpcData` for RPC, `&WsContext` returning `WsMessage` for WebSocket.
+The context parameter picks the transport, and the return type follows from it: `&HttpContext` returning `HttpResponse` for HTTP, `&RpcContext` returning `RpcData` for RPC, `&WsContext` returning `WsMessage` for WebSocket, `&GrpcContext` returning `GrpcStatus` for gRPC. These are the bare answer types, not the `*HandlerResult` aliases an interceptor returns on the same transport.
 
 ## The ErrorHandler chain
 
@@ -255,7 +255,8 @@ Handlers are consulted most-specific first: **method → controller → global**
 
 ```rust
 factory.use_global_http_error_handler(Arc::new(StatusPageErrorHandler));
-// also: use_global_rpc_error_handler, use_global_ws_error_handler
+// also: use_global_rpc_error_handler, use_global_ws_error_handler,
+//       use_global_grpc_error_handler
 ```
 
 The chain dispatches on handler-returned errors and framework events alike. For lifted domain errors, the chain sees the *underlying* error — `#[catch(UserError)]` matches a `UserError` returned through `?` even though the wire type wrapped it in `HttpError::AppError`.
@@ -270,16 +271,16 @@ a handler is the override for the cases where that rendering is wrong.
 
 ## Framework events
 
-When the framework itself is the source of an error, it emits a typed event implementing `toni::Error`. Events flow through the same observer + chain pipeline, so `#[catch]` handlers can reshape them:
+When the framework itself is the source of an error, it raises a typed event implementing `toni::Error`. Events travel the error handler chain alongside handler errors, so `#[catch]` handlers reshape them the same way:
 
-| Event | `kind` | Emitted when |
-|---|---|---|
-| `GuardRejection` | `Forbidden` (403) | A guard returned `false` (or panicked). Carries `guard_index` and an optional `reason`. |
-| `MiddlewareFailure` | `Internal` (500) | Middleware returned `Err` before the handler ran. |
-| `PanicRecovered` | `Internal` (500) | A panic was caught anywhere in the pipeline. Carries the `PipelineSegment` it happened in. |
-| `Cancelled` | `Unavailable` | Nothing yet — the event exists without a producer. |
+| Event | `kind` | Raised when | Transports |
+|---|---|---|---|
+| `GuardRejection` | `Forbidden` (403) | A guard returned `false`. Carries `guard_index` and an optional `reason`. | All four. A WebSocket *connect* is the exception: it refuses the upgrade instead of raising an event. |
+| `Unrouted` | `NotFound` (404) | Nothing is registered to answer the call. Carries the `target` as the caller named it. | RPC and WebSocket. HTTP's 404 and gRPC's `Unimplemented` are written inside routing the framework does not own, so neither raises an event. |
+| `MiddlewareFailure` | `Internal` (500) | Middleware returned `Err` before the handler ran. | HTTP, route-scoped middleware only. |
+| `PanicRecovered` | `Internal` (500) | A panic was caught in the pipeline. Carries the `PipelineSegment` it happened in. | All four. |
 
-All are exported from `toni::errors` (and the crate root). Reshaping a guard rejection:
+All four are exported from `toni::errors`; the crate root re-exports every one but `Unrouted`. Reshaping a guard rejection:
 
 ```rust
 #[catch(toni::errors::GuardRejection)]
@@ -295,52 +296,121 @@ async fn auth_failure(err: &toni::errors::GuardRejection, _ctx: &HttpContext) ->
 }
 ```
 
-## Error observers
+## Observing without shaping
 
-An `ErrorObserver` is a transport-agnostic tap on the error pipeline — it fires for errors flowing through the chain but cannot shape the response. Use it for logging, metrics, and tracing:
+A handler that returns `None` sees the error and changes nothing — the rendering below it runs exactly as it would have. That is how logging, metrics, and tracing attach to the pipeline. The chain stops at the first `Some`, so a decliner registered globally is consulted for every error no more specific handler claimed:
 
 ```rust
-use std::error::Error;
+use std::sync::Arc;
 use toni::async_trait;
-use toni::context::HandlerContext;
-use toni::traits_helpers::ErrorObserver;
+use toni::context::HttpContext;
+use toni::traits_helpers::{ChainError, ErrorHandler};
+use toni::HttpResponse;
 
-pub struct SentryObserver;
+pub struct ErrorLogger;
 
 #[async_trait]
-impl ErrorObserver for SentryObserver {
-    async fn observe<'a>(
-        &'a self,
-        error: &'a (dyn Error + Send + Sync + 'static),
-        _ctx: &'a (dyn HandlerContext + 'a),
-    ) {
-        tracing::error!(error = %error, "request error");
+impl ErrorHandler<HttpContext, HttpResponse> for ErrorLogger {
+    async fn handle_error(&self, error: ChainError<'_>, ctx: &HttpContext) -> Option<HttpResponse> {
+        tracing::error!(
+            error = %error,
+            path = %ctx.request().uri.path(),
+            "request error",
+        );
+        None
     }
 }
 ```
 
 ```rust
-factory.use_global_error_observer(Arc::new(SentryObserver));
+factory.use_global_http_error_handler(Arc::new(ErrorLogger));
 ```
 
-Observers run before the handler chain, so they see every error regardless of whether a handler later claims it. A panicking observer is caught and logged; it never corrupts the dispatch path.
+### Reporting off the request path
+
+A handler runs where the error happened: on the request path, with the client waiting. Enriching a report, shipping it to Sentry, writing it to a store and alerting on it are all slow, and none of them should hold a response open.
+
+Publish the error onto a transport the app already speaks, and do the observing in a consumer. The publish is one socket write on the request path; everything after it happens in another process that can be slow, restarted, or scaled without the endpoint noticing.
+
+```rust
+use serde_json::json;
+use toni::RpcClient;
+
+struct ErrorReporter {
+    client: RpcClient,
+}
+
+#[async_trait]
+impl ErrorHandler<HttpContext, HttpResponse> for ErrorReporter {
+    async fn handle_error(&self, error: ChainError<'_>, ctx: &HttpContext) -> Option<HttpResponse> {
+        let report = json!({
+            "message": error.to_string(),
+            "path": ctx.request().uri.path(),
+            "method": ctx.request().method.as_str(),
+        });
+
+        // Telemetry does not get to decide whether the client gets an answer:
+        // a broker that is down costs one failed write, logged and dropped.
+        if let Err(e) = self.client.emit_json("errors.reported", &report).await {
+            tracing::warn!(error = %e, "could not publish the error report");
+        }
+
+        None
+    }
+}
+```
+
+The consumer is an ordinary `#[event_pattern]` handler, and nothing waits on it:
+
+```rust
+use toni::extractors::Payload;
+
+#[controller]
+pub struct ErrorConsumer {}
+
+#[patterns]
+impl ErrorConsumer {
+    #[new]
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    #[event_pattern("errors.reported")]
+    async fn on_error_reported(
+        &self,
+        Payload(report): Payload<serde_json::Value>,
+    ) -> Result<(), RpcError> {
+        // ship, enrich, alert — this can take as long as it likes
+        println!("{report}");
+        Ok(())
+    }
+}
+```
+
+`examples/error_telemetry.rs` in the repository runs both halves in one process over RabbitMQ.
 
 ## Panic recovery
 
-Every pipeline segment — guards, interceptors, pipes, the handler body, error handlers, and response rendering — is wrapped in `catch_unwind` on every transport. A panic becomes a `PanicRecovered` event tagged with the segment it happened in (`handler`, `guard`, `pipe`, `middleware`, `error_handler`, `response_rendering`), fans out to observers, and is offered to the error handler chain. If nothing claims it, the transport renders its 500 fallback.
+Every role a user writes — middleware, guards, interceptors, handlers, chain handlers, and response rendering — is wrapped in `catch_unwind` on every transport. A panic becomes a `PanicRecovered` event tagged with the segment it happened in, and the event is offered to the error handler chain. If nothing claims it, the transport renders `Internal`.
+
+`PipelineSegment` names the site: `handler`, `guard`, `middleware`, `error_handler`, `response_rendering`, or `other`. Interceptors and middleware chain steps share the `middleware` segment, so an interceptor panic reads back under that name.
 
 The recovery policy per segment:
 
-- **Guard panic** — treated as a rejection: the request is blocked, not torn down.
-- **Interceptor / pipe panic** — remaining pre-handler steps and the handler are skipped; the event renders through the chain.
+- **Guard panic** — a bug, not a verdict. The event goes to the chain and, unclaimed, renders `Internal` on all four transports. A WebSocket *connect* is the exception: there is no answer to shape on a refused upgrade, so the connection closes with 1011 and no chain runs.
+- **Interceptor panic** — the handler and the remaining inner steps are skipped; the event renders through the chain, tagged `middleware`.
 - **Handler panic** — same path as a returned error, with `kind = Internal`.
-- **Error handler panic** — that handler is skipped (`None`) and the chain continues, so one bad handler can't kill error recovery.
-- **Renderer panic** — a minimal hardcoded 500 is substituted, so the client still gets a structured reply.
+- **Error handler panic** — that handler is skipped (`None`) and the chain continues, so one bad handler can't kill error recovery. The log line carries `chain_position`, counted from the most specific handler.
+- **Renderer panic** — the fallback keeps the canonical envelope, written as a literal so none of the user code the renderer was calling runs again: `{"statusCode":500,"message":"Internal Server Error","error":"Internal Server Error"}` as `application/json` on HTTP, `{"status":"error","kind":"Internal","message":"Internal Server Error"}` on RPC and WebSocket.
+
+### What gets logged
+
+An event the chain can reach is delivered and narrated at `debug` — someone is being told, and the log line is for the operator watching. `tracing::error!` is reserved for what can reach nobody: a panicking `#[catch]` handler, a panicking renderer, and an unhandled error in the global middleware chain. An `error!` from the framework means a failure that nothing downstream could be told about.
 
 ## Other transports
 
 The same model runs everywhere; only the wire shape differs:
 
-- **RPC** — handlers return `Result<RpcData, RpcError>` or `Result<T, MyError>`; `RpcError::AppError` wraps lifted domain errors and renders `{"status": "error", "kind": "NotFound", "message": "..."}` as the reply payload. Chain handlers are `ErrorHandler<RpcContext, RpcData>`.
+- **RPC** — handlers return `Result<RpcData, RpcError>` or `Result<T, MyError>`; `RpcError::AppError` wraps lifted domain errors and renders `{"status": "error", "kind": "NotFound", "message": "..."}` as the reply payload. Chain handlers are `ErrorHandler<RpcContext, RpcData>`. A handler that answers with a sequence returns `RpcHandlerResult` instead, and an `Err` item ends the stream — see [RPC Controllers](/docs/microservices/rpc-controllers).
 - **WebSocket** — `WsError::AppError` plays the same role; chain handlers are `ErrorHandler<WsContext, WsMessage>` and produce the message sent back to the client.
-- **gRPC** — handlers return `tonic::Status` errors; chain handlers are `ErrorHandler<GrpcContext, GrpcStatus>` and can remap a status before it reaches the wire. gRPC registers per-method and per-service handlers via the same `#[use_error_handlers]` attribute on `#[grpc_methods]` impls.
+- **gRPC** — a `#[grpc_methods]` handler returns its own error implementing `toni::Error`, or a `GrpcStatus` to name a code outside the eleven kinds. The error travels in `tonic::Status`'s source slot, so `#[catch(MyError)]` matches here as it does everywhere else. Chain handlers are `ErrorHandler<GrpcContext, GrpcStatus>` and can remap a status before it reaches the wire; gRPC registers per-method and per-service handlers via the same `#[use_error_handlers]` attribute on `#[grpc_methods]` impls.

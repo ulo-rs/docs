@@ -8,7 +8,7 @@ Middleware intercepts an HTTP request before it reaches the controller pipeline.
 Middleware runs at two positions:
 
 - **Global middleware** (`factory.use_global_middleware`) wraps the adapter's routing itself — it runs on every request, including 404s, 405s, and same-port WebSocket upgrades. Because it runs before routing, a request replaced via `next.run_with(new_req)` changes which route matches, and returning a response directly answers the request before routing happens at all — this is how the built-in [`CorsMiddleware`](/docs/techniques/cors) answers preflight.
-- **Module-scoped middleware** (`configure_middleware`) is matched to routes by path pattern and runs after routing, before guards, interceptors, and pipes.
+- **Module-scoped middleware** (`configure_middleware`) is matched to routes by path pattern and runs after routing, before guards and interceptors.
 
 ## The Middleware trait
 
@@ -214,7 +214,7 @@ factory.use_global_middleware(Arc::new(FunctionalMiddleware::new(log_fn)));
 Middleware executes in registration order on the way in and unwinds in reverse on the way out:
 
 ```
-Request:  Global chain → routing → route-scoped chain → guards → interceptors → pipes → handler
+Request:  Global chain → routing → route-scoped chain → guards → interceptors → handler
 Response: handler → interceptors → route-scoped chain (reverse) → Global chain (reverse)
 ```
 
@@ -256,7 +256,17 @@ impl Middleware for BodyInspector {
 
 ## Erroring from middleware
 
-Returning `Err` from route-scoped middleware emits a `MiddlewareFailure` event through the error pipeline — observers see it, error handlers can reshape it, and the fallback is a 500 envelope. If the boxed error is an `HttpError`, it is rendered directly with its own status instead. In the global chain, an unhandled `Err` renders a plain 500. See [Error Handling](/docs/request-lifecycle/error-handling).
+Returning `Err` from route-scoped middleware raises a `MiddlewareFailure` event and offers it to the error handler chain, so `#[catch(MiddlewareFailure)]` can reshape it. Unclaimed, it renders the canonical 500 envelope. If the boxed error is an `HttpError`, it is rendered directly with its own status instead.
+
+A panic in route-scoped middleware takes the same route: it is caught, boxed as `PanicRecovered { during: PipelineSegment::Middleware }`, and offered to the chain, so `#[catch(PanicRecovered)]` claims it.
+
+The global chain sits outside the dispatcher, and outside is also outside the chain: it has no error handlers to offer anything to. An unhandled `Err` there — a panic among them — is logged at `error!` and answered with the canonical envelope:
+
+```json
+{ "statusCode": 500, "message": "Internal Server Error", "error": "Internal Server Error" }
+```
+
+See [Error Handling](/docs/request-lifecycle/error-handling).
 
 ## Tower layers
 
