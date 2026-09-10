@@ -1,22 +1,24 @@
 ---
 title: Overview
-description: Contract-first gRPC with tonic — DI-registered services, enhancers, and lifecycle integration via toni-grpc.
+description: Contract-first gRPC with tonic — DI-registered services, extractor-shaped handlers, enhancers, and lifecycle integration via toni-grpc.
 ---
 
-`toni-grpc` drives a [tonic](https://docs.rs/tonic) server through Toni's bind / serve / drain lifecycle. Services declared with `#[grpc_service]` + `#[grpc_methods]` are discovered via DI and wrapped with the enhancer pipeline — guards, interceptors, error handlers, and panic recovery — before being handed to tonic. There is no manual `*Server::new(handler)` step in user code.
+`toni-grpc` drives a [tonic](https://docs.rs/tonic) server through Toni's bind / serve / drain lifecycle. A service is a `#[controller]` struct whose handlers live in an inherent impl marked `#[grpc_methods(proto::Trait)]`. DI discovers it and wraps every method with the enhancer pipeline — guards, interceptors, error handlers, and panic recovery — before handing it to tonic. There is no manual `*Server::new(handler)` step in user code.
 
 ## Contract-first, not pattern-string
 
-The [RPC adapters](/docs/microservices) (TCP, NATS, and friends) route by pattern strings with JSON payloads resolved at runtime. gRPC is different by design: services and methods are declared in `.proto` files, known at compile time via tonic-generated traits, dispatched with typed protobuf messages, and support four call shapes (unary plus three streaming modes). None of that fits the pattern-string + JSON contract, so gRPC has its own adapter interface (`use_grpc_adapter`) and its own macros instead of `#[rpc_controller]`.
+The [RPC adapters](/docs/microservices) (TCP, NATS, and friends) route by pattern strings with JSON payloads resolved at runtime. gRPC is different by design: services and methods are declared in `.proto` files, known at compile time via tonic-generated traits, dispatched with typed protobuf messages, and support four call shapes (unary plus three streaming modes). None of that fits the pattern-string + JSON contract, so gRPC has its own adapter interface (`use_grpc_adapter`) and its own handler macro instead of the `#[patterns]` impl the RPC transports use.
 
-The `.proto` file is the source of truth. A `build.rs` compiles it to a Rust trait; your service implements that trait; the framework wraps the impl and registers it with tonic at bind time.
+The `.proto` file is the source of truth, and `build.rs` turns it into Rust in two steps. `tonic-prost-build` compiles the messages and the service trait; `toni_build::shapes` then writes, beside that trait, what each method carries on the wire. The second step is what lets a handler take extractors: a macro runs before name resolution and cannot learn a method's request type by reading the handler, so `#[grpc_methods]` projects it through the companion instead. Your handlers stay an inherent impl — the macro writes the trait impl around them.
 
 <FromNest>
 There is no `protoLoader` and no runtime `.proto` parsing. The contract is
-compiled by `tonic-prost-build` in `build.rs`, and the generated trait is what
-you implement — a method that does not match the service fails to compile.
-Guards, interceptors, and error handlers all apply here; pipes do not, and there
-are no gRPC globals.
+compiled by `tonic-prost-build` in `build.rs`, and the trait it generates is
+what the framework implements around your handlers — an rpc declared in the
+proto and left out of the service fails to compile. Guards, interceptors, and
+error handlers all apply here, at global, service, and method level; the global
+registrars are `use_global_grpc_guards`, `use_global_grpc_interceptors`, and
+`use_global_grpc_error_handler` on `ToniFactory`.
 </FromNest>
 
 ## Installation
@@ -32,28 +34,36 @@ tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"
+toni-build = "0.1"
 protoc-bin-vendored = "3"   # optional — vendors protoc for the build
 ```
 
-`tonic-prost-build` generates the trait and message types at build time; `tonic-prost` and `prost` are their runtime counterparts. `protoc-bin-vendored` removes the system `protoc` requirement — see the [quick start](/docs/grpc/quick-start) for the `build.rs` wiring.
+`tonic-prost-build` generates the trait and message types at build time; `tonic-prost` and `prost` are their runtime counterparts. `toni-build` writes the method shapes `#[grpc_methods]` reads — without it the macro expands to a path that does not resolve. `protoc-bin-vendored` removes the system `protoc` requirement.
 
-`toni-grpc` has no feature flags. Its only export is `GrpcAdapter`.
+`toni-grpc` is a compile dependency, not only a serve dependency: the code `#[grpc_methods]` emits names `::toni_grpc::MethodShape`, so a crate that never mentions `GrpcAdapter` still needs the dependency. Its exports are `GrpcAdapter`, `GrpcRequest`, `MethodShape`, the `shape` module, and `to_status`. Two cargo features select the TLS crypto provider — `tls-ring` and `tls-aws-lc` — and nothing else on the crate is gated.
+
+See the [quick start](/docs/grpc/quick-start) for the `build.rs` wiring end to end.
 
 ## What the adapter provides
 
-- **DI-registered services** — `#[grpc_service]` makes the service a dispatch target, declared in a module's `controllers` list; `#[inject]` fields resolve from the module's providers
-- **Enhancers per call** — guards, interceptors, and error handlers at service or method level ([enhancers](/docs/grpc/enhancers))
+- **DI-registered services** — `#[controller]` makes the service a dispatch target, declared in a module's `controllers` list; `#[inject]` fields resolve from the module's providers
+- **Handlers in the framework's shapes** — every parameter is an extractor (`Payload<T>`, `Inbound<T>`, `Extensions`, `&GrpcContext`), in any order, and the answer is the reply message plus your own error type
+- **Enhancers per call** — guards, interceptors, and error handlers at global, service, or method level ([enhancers](/docs/grpc/enhancers))
 - **Panic recovery** — a panicking handler surfaces as `Internal` on the wire; the server stays up ([error handling](/docs/grpc/error-handling))
 - **All four call modes** — unary, server-streaming, client-streaming, bidirectional ([streaming](/docs/grpc/streaming))
-- **Graceful shutdown** with a configurable drain timeout, backpressure caps, and a per-call tracing span ([operations](/docs/grpc/operations))
+- **Graceful shutdown** with a configurable drain timeout, backpressure caps, TLS, and a per-call tracing span ([operations](/docs/grpc/operations))
+
+Calling *out* to another gRPC service needs no adapter at all — the generated client is [an ordinary provider](/docs/grpc/client).
 
 ## Lifecycle
 
 The gRPC adapter participates in the standard bind → run → shutdown sequence:
 
 - `app.use_grpc_adapter(GrpcAdapter::new(addr))` registers the adapter during configuration.
-- `app.bind()` resolves the DI-registered services, registers them with tonic, and binds the socket **synchronously** — a port conflict surfaces as `StartupError::Adapter { transport: "grpc", .. }` from `bind()`, not a panic inside the serve loop. The returned `BoundAdapters.grpc: Option<SocketAddr>` carries the bound address (port-0 friendly).
+- `app.bind()` resolves the DI-registered services, registers them with tonic, builds the TLS acceptor if one is configured, and binds the socket **synchronously** — a port conflict or an unreadable certificate surfaces as `StartupError::Adapter { transport: "grpc", .. }` from `bind()`, not a panic inside the serve loop. The returned `BoundAdapters.grpc: Option<SocketAddr>` carries the bound address (port-0 friendly).
 - `app.run()` drives the serve loop alongside every other adapter until shutdown is signalled via `ShutdownHandle`.
-- On shutdown, tonic drains in-flight calls under a drain timer (default 10 s); when the budget elapses, remaining streams are aborted and clients see `UNAVAILABLE`.
+- On shutdown, tonic drains in-flight calls under a drain timer (default 10 s). When the budget elapses, the replies still open are ended — each closes with `UNAVAILABLE` — and the serve future is awaited for at most two seconds more, so shutdown reports complete only once tonic has closed the connections.
 
 `app.start()` is bind + run in one call. Either way, the application must run on a single thread — see the [LocalSet requirement](/docs/grpc/quick-start#the-localset-requirement) in the quick start.
+
+A route prefix on a gRPC controller is ignored — `#[controller("/orders")]` on a service whose handlers are `#[grpc_methods]` warns at startup, because the wire path comes from the proto.

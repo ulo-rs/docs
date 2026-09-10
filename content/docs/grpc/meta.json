@@ -6,6 +6,7 @@
     "streaming",
     "enhancers",
     "error-handling",
+    "client",
     "operations"
   ]
 }

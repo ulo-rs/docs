@@ -1,0 +1,96 @@
+---
+title: Clients
+description: Calling another gRPC service from inside a Toni application — the tonic-generated client as a provider, lazy connection, and header propagation.
+---
+
+There is no client module and no client adapter. The tonic-generated client is a provider: registered under its own type with `provider_factory!`, resolved with a bare `#[inject]`, dropped by the container when the module goes.
+
+An integration earns a module when something has to own a lifetime the container cannot infer from a constructor expression — a pool with configuration beyond a URL, a startup check, a shutdown hook with work to do, a health indicator sharing the connection. A gRPC client owns none of those. It is one expression, and dropping the channel is closing it.
+
+## Registering one
+
+```rust
+use toni::{module, provider_factory};
+use tonic::transport::Channel;
+
+use orders_pb::orders_client::OrdersClient;
+
+#[module(
+    controllers: [OrdersGateway],
+    providers: [provider_factory!(OrdersClient<Channel>, || {
+        let channel = Channel::from_static("http://orders:50051").connect_lazy();
+        OrdersClient::new(channel)
+    })]
+)]
+impl AppModule {}
+```
+
+`connect_lazy` dials on the first call rather than inside the factory. That is the whole reason startup does not depend on the peer: a service whose upstream is not up yet still boots, and reaching a dead peer is an ordinary handler error rather than a boot failure. It also matches how the [RPC client transports](/docs/microservices/rpc-controllers) behave — no I/O in a constructor.
+
+The token is the type, so the spelling in the attribute does not matter: `OrdersClient<Channel>` and `OrdersClient<tonic::transport::Channel>` name the same provider.
+
+## Injecting one
+
+```rust
+#[controller("/orders")]
+pub struct OrdersGateway {
+    #[inject]
+    orders: OrdersClient<Channel>,
+}
+
+#[routes]
+impl OrdersGateway {
+    #[get("/place")]
+    async fn place(&self) -> Body {
+        // The client is cheap to clone and the clone shares the connection,
+        // so a handler clones it to get the `&mut` tonic asks for.
+        let mut orders = self.orders.clone();
+        match orders
+            .create(orders_pb::CreateOrderRequest {
+                item: "keyboard".to_string(),
+                qty: 1,
+            })
+            .await
+        {
+            Ok(reply) => Body::json(serde_json::json!({
+                "id": reply.into_inner().id,
+            })),
+            Err(status) => Body::json(serde_json::json!({
+                "error": status.code().to_string(),
+                "message": status.message(),
+            })),
+        }
+    }
+}
+```
+
+Nothing about the caller has to be gRPC. The controller above serves HTTP and calls gRPC; a `#[grpc_methods]` service, a `#[patterns]` RPC controller, or a WebSocket gateway injects the same client the same way.
+
+Two clients of the same generated type — the same service in two regions, say — need a token each: `provider_factory!("orders-eu", || …)` registers under a string token, and `#[inject("orders-eu")]` asks for it. See [provider patterns](/docs/core-concepts/provider-patterns).
+
+## Passing something along
+
+Nothing rides along on its own. There is no ambient per-call state in the framework, so an outbound call carries what the handler puts on it — a decision made with the context the handler already holds:
+
+```rust
+#[grpc_method]
+async fn create(
+    &self,
+    Payload(req): Payload<orders_pb::CreateOrderRequest>,
+    ctx: &GrpcContext,
+) -> Result<orders_pb::CreateOrderResponse, OrderError> {
+    let mut request = tonic::Request::new(orders_pb::ReserveRequest { item: req.item });
+    if let Some(value) = ctx.header("x-request-id").and_then(|id| id.parse().ok()) {
+        request.metadata_mut().insert("x-request-id", value);
+    }
+    let mut stock = self.stock.clone();
+    let reserved = stock.reserve(request).await;
+    // ...
+}
+```
+
+`ctx.deadline()` is worth reading here too: it says when the caller stops waiting, which is the budget an outbound call has to fit inside.
+
+## A runnable version
+
+`examples/grpc_client.rs` in the repository serves an HTTP route that calls a gRPC service in the same process — one command, no second terminal (`cargo run --example grpc_client`). Point the endpoint at another host and nothing else changes.

@@ -1,9 +1,9 @@
 ---
 title: Streaming
-description: Unary, server-streaming, client-streaming, and bidirectional handlers through #[grpc_methods].
+description: "Unary, server-streaming, client-streaming, and bidirectional handlers — Payload, Inbound, #[grpc_stream], and what happens when a caller abandons a reply."
 ---
 
-All four gRPC call modes work through `#[grpc_methods]` without per-mode setup — the macro hands tonic an instance of the trait impl and tonic dispatches. The signatures below come from the framework's integration suite; the proto they implement:
+All four gRPC call modes are written in the same inherent impl. Which one a handler serves is read off its own shape: `Inbound<T>` says the caller streams, and `#[grpc_stream]` says the reply does. The proto the handlers below implement:
 
 ```protobuf
 service Orders {
@@ -14,108 +14,173 @@ service Orders {
 }
 ```
 
+`OrderError` below is the service's own error type, implementing `toni::Error` — see [error handling](/docs/grpc/error-handling).
+
 ## Unary
 
-Request in, response out:
+The message in, the reply out:
 
 ```rust
+#[grpc_method]
 async fn create(
     &self,
-    request: tonic::Request<orders_pb::CreateOrderRequest>,
-) -> Result<tonic::Response<orders_pb::CreateOrderResponse>, tonic::Status> {
-    let req = request.into_inner();
-    Ok(tonic::Response::new(orders_pb::CreateOrderResponse {
+    Payload(req): Payload<orders_pb::CreateOrderRequest>,
+) -> Result<orders_pb::CreateOrderResponse, OrderError> {
+    if req.qty == 0 {
+        return Err(OrderError::InvalidQty { qty: req.qty });
+    }
+    Ok(orders_pb::CreateOrderResponse {
         id: self.counter.next_id(),
         status: format!("created:{}", req.item),
-    }))
+    })
 }
 ```
 
 ## Server streaming
 
-The tonic-generated trait expects an associated stream type. Declare it as a pinned boxed stream and return any stream of `Result<Item, Status>`:
+`#[grpc_stream]` marks the reply as a stream. The return type is written as `impl Stream<Item = …>` and the item type is read from that `Item` binding, so it has to be spelled there — a type alias standing in for the stream leaves the macro nothing to read. Items are `Result<Reply, E>` with the same error type the handler answers with:
 
 ```rust
-use std::pin::Pin;
-use futures_util::Stream;
+use toni::futures::Stream;
 
-type WatchProgressStream =
-    Pin<Box<dyn Stream<Item = Result<orders_pb::ProgressEvent, tonic::Status>> + Send>>;
-
+#[grpc_stream]
 async fn watch_progress(
     &self,
-    request: tonic::Request<orders_pb::WatchRequest>,
-) -> Result<tonic::Response<Self::WatchProgressStream>, tonic::Status> {
-    let id = request.into_inner().id;
-    let stream = futures_util::stream::iter(
+    Payload(req): Payload<orders_pb::WatchRequest>,
+) -> Result<
+    impl Stream<Item = Result<orders_pb::ProgressEvent, OrderError>> + Send + 'static,
+    OrderError,
+> {
+    let id = req.id;
+    Ok(toni::futures::stream::iter(
         ["queued", "picked", "shipped"].into_iter().map(move |status| {
             Ok(orders_pb::ProgressEvent { id, status: status.to_string() })
         }),
-    );
-    Ok(tonic::Response::new(Box::pin(stream)))
+    ))
 }
 ```
+
+The associated stream type tonic asks for is declared for you. tonic derives a method and its associated type from one proto identifier — `WatchProgress` becomes `watch_progress` and `WatchProgressStream` — and `#[grpc_stream]` follows that pairing. A trait where the two names are set independently, as `tonic_build::manual` allows, names the type on the attribute instead:
+
+```rust
+// The trait declares `StreamProgressStream` for a method called `watch`,
+// so the pairing cannot be inferred and the attribute carries it.
+#[grpc_stream(StreamProgressStream)]
+async fn watch(
+    &self,
+    Payload(req): Payload<msgs::WatchRequest>,
+) -> Result<
+    impl Stream<Item = Result<msgs::ProgressEvent, WatchFailed>> + Send + 'static,
+    WatchFailed,
+> {
+    // ...
+}
+```
+
+A stream that cannot fail to open drops the outer `Result` and returns `impl Stream<…>` directly; the items still carry theirs.
 
 ## Client streaming
 
-The request wraps a `tonic::Streaming<T>`; consume it with `StreamExt::next` and return a single summary response:
+The caller's stream arrives as `Inbound<T>`, which yields the message type — not tonic's `Streaming`. An item fails when the caller's stream does: a dropped connection, a message that will not decode. The failure is a `GrpcStatus`, so the handler names nothing from the wire crate. The reply is a single message, so the handler is a plain `#[grpc_method]`:
 
 ```rust
-use futures_util::StreamExt;
+use toni::extractors::Inbound;
+use toni::futures::StreamExt;
 
+#[grpc_method]
 async fn bulk_create(
     &self,
-    request: tonic::Request<tonic::Streaming<orders_pb::CreateOrderRequest>>,
-) -> Result<tonic::Response<orders_pb::BulkCreateResponse>, tonic::Status> {
-    let mut stream = request.into_inner();
-    let mut created: u32 = 0;
+    mut inbound: Inbound<orders_pb::CreateOrderRequest>,
+) -> Result<orders_pb::BulkCreateResponse, OrderError> {
     let first_id = self.counter.next_id();
-    while let Some(item) = stream.next().await {
-        let _req = item?;
-        if created > 0 {
-            self.counter.next_id();
-        }
+    let mut created: u32 = 0;
+    while let Some(item) = inbound.next().await {
+        let _req = item.map_err(|_| OrderError::CallerStreamBroken)?;
         created += 1;
     }
-    Ok(tonic::Response::new(orders_pb::BulkCreateResponse { created, first_id }))
+    Ok(orders_pb::BulkCreateResponse { created, first_id })
 }
 ```
+
+A handler that answers `Result<Reply, GrpcStatus>` can write `item?` instead of mapping — `GrpcStatus` implements `toni::Error`, so it is a handler error type like any other.
 
 ## Bidirectional streaming
 
-Combines both shapes: a `Streaming<T>` request and an associated stream response. The [`async-stream`](https://docs.rs/async-stream) crate keeps the echo loop readable:
+Both halves at once: `Inbound<T>` for what arrives, `#[grpc_stream]` for what goes back.
 
 ```rust
-type ChatStream =
-    Pin<Box<dyn Stream<Item = Result<orders_pb::ChatMessage, tonic::Status>> + Send>>;
+use toni::futures::StreamExt;
 
+#[grpc_stream]
 async fn chat(
     &self,
-    request: tonic::Request<tonic::Streaming<orders_pb::ChatMessage>>,
-) -> Result<tonic::Response<Self::ChatStream>, tonic::Status> {
-    let mut inbound = request.into_inner();
-    let counter = self.counter.clone();
-    let outbound = async_stream::stream! {
-        while let Some(msg) = inbound.next().await {
-            match msg {
-                Ok(m) => yield Ok(orders_pb::ChatMessage {
-                    text: m.text,
-                    id: counter.next_id(),
-                }),
-                Err(e) => yield Err(e),
+    mut inbound: Inbound<orders_pb::ChatMessage>,
+) -> Result<
+    impl Stream<Item = Result<orders_pb::ChatMessage, OrderError>> + Send + 'static,
+    OrderError,
+> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(item) = inbound.next().await {
+            let reply = item
+                .map(|msg| orders_pb::ChatMessage { text: msg.text })
+                .map_err(|_| OrderError::CallerStreamBroken);
+            if tx.send(reply).is_err() {
+                return;
             }
         }
-    };
-    Ok(tonic::Response::new(Box::pin(outbound)))
+    });
+    Ok(tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
 }
 ```
+
+## A reply the caller abandons
+
+A streaming reply outlives the handler that returned it, and whatever feeds it — a spawned task, a database cursor, a subscription — outlives it too. The framework keeps the execution alive for as long as the reply is being served and cancels it when the reply is dropped with items still to come: a reset stream, a dead connection, a shutdown that ended the call. Take `&GrpcContext` alongside the request, clone it into the producer, and select on its token:
+
+```rust
+use std::time::Duration;
+
+use toni::context::{GrpcContext, HandlerContext};
+
+#[grpc_stream]
+async fn watch_progress(
+    &self,
+    Payload(req): Payload<orders_pb::WatchRequest>,
+    ctx: &GrpcContext,
+) -> Result<
+    impl Stream<Item = Result<orders_pb::ProgressEvent, OrderError>> + Send + 'static,
+    OrderError,
+> {
+    let context = ctx.clone();
+    let id = req.id;
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            let _ = tx.send(Ok(orders_pb::ProgressEvent {
+                id,
+                status: "tick".to_string(),
+            }));
+            tokio::select! {
+                _ = context.cancellation().cancelled() => return,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    });
+    Ok(tokio_stream::wrappers::UnboundedReceiverStream::new(rx))
+}
+```
+
+Without that select, the task keeps producing into a channel nobody reads. `cancellation()` comes from the `HandlerContext` trait, so that trait has to be in scope; a buffered unary reply never fires the token, because there is nothing to abandon.
+
+`Stream` and `StreamExt` above come from `toni::futures`, which re-exports the `futures` crate — no separate dependency. The channel wrapper is `tokio-stream`.
 
 ## Enhancers and streams
 
 Enhancers apply to streaming methods the same way they apply to unary ones, with one timing nuance:
 
-- **Guards** run before the response stream is opened — a rejection means the client never receives a stream.
+- **Guards** run before the response stream is opened — a rejection means the caller never receives a stream.
 - **Interceptors** wrap the call up to the point the stream is returned, not the lifetime of the stream itself.
-- **Error handlers** fire when the handler returns `Err` or panics *before* producing the stream. Errors yielded *inside* the stream are produced by your code and pass through to the client unchanged.
+- **Error handlers** see the reply that *opens* the stream: a handler returning `Err` before producing anything, or panicking there. An item that fails afterwards arrives once the answer has begun, so no handler is offered it — its error is mapped straight to the code its `kind()` means and sent as the item.
 
-On shutdown, streams still open when the drain timeout elapses are aborted and clients see `UNAVAILABLE` — see [operations](/docs/grpc/operations#graceful-shutdown-and-drain).
+On shutdown, a stream still open when the drain timeout elapses is ended and its caller sees `UNAVAILABLE` — the same ending that fires the cancellation token above. See [operations](/docs/grpc/operations#graceful-shutdown-and-drain).

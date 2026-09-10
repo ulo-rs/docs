@@ -1,6 +1,6 @@
 ---
 title: Operations
-description: Graceful shutdown and drain, backpressure caps, tracing, non-DI services, and bound-address discovery.
+description: Graceful shutdown and drain, backpressure caps, TLS, tracing, reflection and health, non-DI services, and bound-address discovery.
 ---
 
 Runtime knobs on `GrpcAdapter` and how the adapter behaves in production. All snippets run inside the [LocalSet block](/docs/grpc/quick-start#the-localset-requirement) from the quick start.
@@ -13,7 +13,7 @@ Shutdown is signalled through the application's `ShutdownHandle` — the framewo
 let mut app = ToniFactory::create(AppModule).await.unwrap();
 app.use_grpc_adapter(toni_grpc::GrpcAdapter::new(addr)).unwrap();
 
-let bound = app.bind().await.unwrap();
+app.bind().await.unwrap();
 let shutdown = app.shutdown_handle();
 tokio::task::spawn_local(async move {
     tokio::signal::ctrl_c().await.ok();
@@ -30,11 +30,15 @@ use std::time::Duration;
 let adapter = toni_grpc::GrpcAdapter::new(addr)
     .with_drain_timeout(Duration::from_secs(30));
 
-// Wait forever — no abort:
+// Wait without bound:
 let adapter = adapter.with_drain_timeout(None);
 ```
 
-When the timer elapses with calls still running, the serve future is dropped: connections close, streaming clients see `UNAVAILABLE`, and shutdown proceeds to the next step. The timer starts when shutdown is signalled, not at startup — a long-lived server is unaffected until drain begins. A never-closing bidirectional stream is the case this exists for: without the budget, one parked client would pin shutdown indefinitely.
+When the timer elapses with calls still running, the deadline **ends** each reply still in flight rather than dropping the server under it. Every one of them closes with `UNAVAILABLE`, so the caller is told why instead of losing the connection, and a streaming handler's [cancellation token](/docs/grpc/streaming#a-reply-the-caller-abandons) fires as its reply ends. The serve future is then awaited — for the drain timeout again or two seconds, whichever is shorter — so shutdown reports complete only once tonic has closed the connections, and `close()` returns within twice the timeout you set.
+
+The deadline is what ends a call; it does not reach inside one. A streaming handler goes on producing until its reply is ended, which is why the cancellation token is the thing to select on in a producer that would otherwise run forever.
+
+The timer starts when shutdown is signalled, not at startup — a long-lived server is unaffected until drain begins. A never-closing bidirectional stream is the case this exists for: without the budget, one parked client would pin shutdown indefinitely.
 
 ## Backpressure
 
@@ -50,6 +54,29 @@ let adapter = toni_grpc::GrpcAdapter::new(addr)
 - `with_max_per_connection(n)` bounds one connection's parallel calls, so a single client opening many streams can't monopolise the server even below the global cap.
 
 The two stack; reaching either limit rejects the call. Pass `None` to remove a cap.
+
+## TLS
+
+`with_tls` takes `tonic::transport::ServerTlsConfig` as it is. Where certificates come from, how they rotate, and whether client certificates are demanded differ per deployment, so the configuration is passed through rather than wrapped:
+
+```rust
+use std::fs;
+use tonic::transport::{Identity, ServerTlsConfig};
+
+let identity = Identity::from_pem(fs::read("server.pem")?, fs::read("server.key")?);
+let adapter = toni_grpc::GrpcAdapter::new(addr)
+    .with_tls(ServerTlsConfig::new().identity(identity));
+```
+
+mTLS is `ServerTlsConfig::client_ca_root`; the rest of the surface is tonic's.
+
+The method is behind a cargo feature naming the crypto provider — the same choice tonic asks for, left where the deployment can make it. With both enabled, tonic resolves to ring.
+
+```toml title="Cargo.toml"
+toni-grpc = { version = "0.1", features = ["tls-ring"] }   # or "tls-aws-lc"
+```
+
+The acceptor is built during `app.bind()`, so a certificate the process cannot read is a `StartupError::Adapter` from `bind()` and the socket is never opened — the first connection is not where you find out.
 
 ## Tracing
 
@@ -67,7 +94,7 @@ The same `rpc.request` span shape (with `transport = "tcp"` / `"udp"`) is emitte
 
 ## Mixing DI and plain tonic services
 
-`GrpcAdapter::add_service` accepts any tonic-generated service handle, so manually built services can sit alongside `#[grpc_service]`-registered ones:
+`GrpcAdapter::add_service` accepts any tonic-generated service handle, so manually built services can sit alongside the ones `#[controller]` + `#[grpc_methods]` registers:
 
 ```rust
 let adapter = toni_grpc::GrpcAdapter::new(addr)
@@ -75,7 +102,38 @@ let adapter = toni_grpc::GrpcAdapter::new(addr)
 app.use_grpc_adapter(adapter).unwrap();
 ```
 
-Services added this way are a passthrough to tonic — no DI, no guards, no interceptors, no error handlers, no panic recovery. Useful for stock services such as `tonic-health` or `tonic-reflection`.
+Services added this way are a passthrough to tonic — no DI, no guards, no interceptors, no error handlers, no panic recovery. A handler there reaches the execution's context, when there is one, through `GrpcContext::of(request.extensions())`; a service registered this way has none, so it answers `None`. Stock services are the usual reason to reach for it.
+
+## Reflection and health
+
+Both are ordinary tonic services, so both arrive through `add_service`. Neither is a dependency of `toni-grpc` and neither has a builder knob on the adapter.
+
+Reflection lets `grpcurl` and its kin explore the server without a local `.proto`. What it serves is the compiled schema, so `build.rs` has to write the descriptor set out:
+
+```rust title="build.rs"
+let descriptor = std::path::PathBuf::from(std::env::var("OUT_DIR")?)
+    .join("orders_descriptor.bin");
+tonic_prost_build::configure()
+    .file_descriptor_set_path(&descriptor)
+    .compile_protos(&["proto/orders.proto"], &["proto"])?;
+toni_build::shapes("toni_examples.orders")?;
+```
+
+```rust
+const DESCRIPTOR: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/orders_descriptor.bin"));
+
+let reflection = tonic_reflection::server::Builder::configure()
+    .register_encoded_file_descriptor_set(DESCRIPTOR)
+    .build_v1()?;
+let adapter = toni_grpc::GrpcAdapter::new(addr).add_service(reflection);
+```
+
+`grpcurl -plaintext 127.0.0.1:50051 list` then answers with the services the framework registered from `#[grpc_methods]` — reflection and DI discovery reach the same route set.
+
+Register the versions the callers need: newer tooling speaks `grpc.reflection.v1`, older speaks `grpc.reflection.v1alpha`, and `build_v1alpha()` is the other constructor. Which schemas a server exposes is a policy decision, which is why it is written out rather than switched on.
+
+`tonic-health` works the same way. `tonic_health::server::health_reporter()` hands back a service and a reporter; the service goes to `add_service`, and the reporter is what your own code drives as dependencies come and go. For health over HTTP instead, see [health checks](/docs/techniques/health).
 
 ## Bound address
 

@@ -1,28 +1,82 @@
 ---
 title: Error Handling
-description: GrpcStatus and GrpcCode, the error-handler chain, and panic recovery on gRPC calls.
+description: Domain errors to gRPC codes, GrpcStatus, the error-handler chain, and panic recovery on gRPC calls.
 ---
 
-Handlers return `Err(tonic::Status)` as in plain tonic. The framework adds a layer on top: every user-returned error and every recovered panic is offered to an error-handler chain that can remap it to a different status before it reaches the wire.
-
-## GrpcStatus and GrpcCode
-
-`toni::GrpcStatus` is the transport-neutral mirror of `tonic::Status` — it lets guards, interceptors, and error handlers name a gRPC error without depending on tonic. The adapter converts to and from `tonic::Status` at the wire boundary.
+A handler answers with its own error type — the same `toni::Error` a handler on any other transport would return. Its `kind()` decides the code on the wire, so one error type serves HTTP, RPC, WebSocket and gRPC without a per-transport branch. Every error a handler returns and every recovered panic is offered to an error-handler chain that can reshape it before it reaches the caller.
 
 ```rust
-pub struct GrpcStatus {
-    pub code: GrpcCode,
-    pub message: String,
+#[derive(Debug, toni::Error)]
+enum OrderError {
+    #[error_kind(BadRequest)]
+    InvalidQty { qty: u32 },
+
+    #[error_kind(Conflict)]
+    OutOfStock { item: String },
 }
 ```
 
-Constructors: `GrpcStatus::new(code, message)` plus shorthands `permission_denied`, `invalid_argument`, `internal`, `not_found`, and `unauthenticated`.
+Returned from a handler, `InvalidQty` reaches the caller as `INVALID_ARGUMENT` and `OutOfStock` as `ABORTED`.
+
+## Kinds and codes
+
+`grpc_code(kind)` is the mapping, following the canonical HTTP-to-gRPC table:
+
+| `ErrorKind` | Code |
+|---|---|
+| `BadRequest` | `INVALID_ARGUMENT` |
+| `Unauthorized` | `UNAUTHENTICATED` |
+| `Forbidden` | `PERMISSION_DENIED` |
+| `NotFound` | `NOT_FOUND` |
+| `Conflict` | `ABORTED` |
+| `UnprocessableEntity` | `INVALID_ARGUMENT` |
+| `TooManyRequests` | `RESOURCE_EXHAUSTED` |
+| `Timeout` | `DEADLINE_EXCEEDED` |
+| `Unavailable` | `UNAVAILABLE` |
+| `Unimplemented` | `UNIMPLEMENTED` |
+| `Internal` | `INTERNAL` |
+
+`Conflict` is `ABORTED` because that is the table's answer for 409. A service that means "this already exists" rather than "the state moved under you" names `GrpcCode::AlreadyExists` itself.
+
+`error_kind(code)` inverts the table where it has an answer. Five codes sit outside it — `FailedPrecondition`, `OutOfRange`, `AlreadyExists`, `DataLoss`, `Cancelled` — and read back as `Internal`, which is what a status named with one of them renders as on a transport that reads kinds rather than codes.
+
+## GrpcStatus and GrpcCode
+
+`toni::GrpcStatus` is the transport-neutral mirror of `tonic::Status`. It lets guards, interceptors, and error handlers name a gRPC error without depending on tonic; the adapter converts at the wire boundary.
+
+Build one with `GrpcStatus::new(code, message)` or the shorthands `permission_denied`, `invalid_argument`, `internal`, `not_found`, and `unauthenticated`. Three more constructors exist for carrying a domain error along with the code:
+
+- `GrpcStatus::of(error)` — the status an owned error maps to, keeping the error. A value that is already a `GrpcStatus` answers as itself rather than being re-derived, so a code named by hand survives the trip.
+- `GrpcStatus::from_error(&error)` — the same mapping through a reference, keeping nothing.
+- `status.caused_by(error)` — keeps `error` on a status whose code was named rather than derived.
+
+A `GrpcStatus` is not a struct literal: alongside the public `code` and `message` it holds the error it was built from, and that slot is private.
 
 `GrpcCode` covers all 17 canonical codes (`Ok`, `Cancelled`, `Unknown`, `InvalidArgument`, `DeadlineExceeded`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `ResourceExhausted`, `FailedPrecondition`, `Aborted`, `OutOfRange`, `Unimplemented`, `Internal`, `Unavailable`, `DataLoss`, `Unauthenticated`). Its numeric values match `tonic::Code`, so `as i32` round-trips.
 
+### Naming a code no kind reaches
+
+`GrpcStatus` implements `toni::Error`, so a handler returns one directly when it needs a code the eleven kinds do not produce. Add `.caused_by(...)` to keep a domain type the chain can still match on:
+
+```rust
+#[grpc_method]
+async fn create(
+    &self,
+    Payload(req): Payload<orders_pb::CreateOrderRequest>,
+) -> Result<orders_pb::CreateOrderResponse, GrpcStatus> {
+    if req.qty > 1000 {
+        return Err(GrpcStatus::new(GrpcCode::OutOfRange, "past the last slot")
+            .caused_by(OrderError::InvalidQty { qty: req.qty }));
+    }
+    // ...
+}
+```
+
 ## Error handlers
 
-An error handler implements `ErrorHandler<GrpcContext, GrpcStatus>`. The chain offers it two error sources: a user-returned `Err(Status)` (wrapped as `GrpcStatus`) and a caught handler panic (as a typed `PanicRecovered` event). Returning `Some(GrpcStatus)` claims the response; `None` passes to the next handler; when no handler claims, the original status reaches the wire unchanged.
+An error handler implements `ErrorHandler<GrpcContext, GrpcStatus>`. Returning `Some(GrpcStatus)` claims the answer; `None` passes to the next handler; when no handler claims, the code the error's kind maps to is what the caller sees.
+
+The chain is handed the handler's own error, not the status it flattened into — the domain error rides out on the answer and is recovered on the way to the chain. `downcast_ref::<MyError>()` therefore matches here exactly as it does on the other three transports:
 
 ```rust
 use toni::{GrpcCode, GrpcContext, GrpcStatus};
@@ -39,37 +93,74 @@ impl ErrorHandler<GrpcContext, GrpcStatus> for QtyErrorHandler {
         error: ChainError<'_>,
         _ctx: &GrpcContext,
     ) -> Option<GrpcStatus> {
-        if error.to_string().contains("invalid-qty") {
-            Some(GrpcStatus::new(
-                GrpcCode::FailedPrecondition,
-                "qty must be positive",
-            ))
-        } else {
-            None
-        }
+        let OrderError::InvalidQty { qty } = error.downcast_ref::<OrderError>()? else {
+            return None;
+        };
+        Some(GrpcStatus::new(
+            GrpcCode::FailedPrecondition,
+            format!("qty must be positive, got {qty}"),
+        ))
     }
 }
 ```
 
-Applied with `#[use_error_handlers(QtyErrorHandler)]` at the impl or method level, this turns the handler's `Err(Status::invalid_argument("invalid-qty:0"))` into `FAILED_PRECONDITION` on the wire; any other error passes through untouched.
+Applied with `#[use_error_handlers(QtyErrorHandler)]` at the impl or method level, this turns `Err(OrderError::InvalidQty { qty: 0 })` into `FAILED_PRECONDITION`; any other error passes through untouched.
+
+For a handler that exists only to reshape one type, `#[catch(T)]` lowers a free async function into the same trait impl. Both parameters are shared references, and the return type is the bare `GrpcStatus`:
+
+```rust
+use toni::{catch, GrpcCode, GrpcContext, GrpcStatus};
+
+#[catch(OrderError)]
+async fn reshape_order_error(err: &OrderError, _ctx: &GrpcContext) -> GrpcStatus {
+    GrpcStatus::new(GrpcCode::FailedPrecondition, err.to_string())
+}
+
+// registered on the factory, before the application is created
+factory.use_global_grpc_error_handler(Arc::new(reshape_order_error));
+```
+
+A handler that returns `None` for everything observes without shaping — that is the seam for logging or metrics on failed calls.
 
 ### Chain order
 
-Method-level handlers run before service-level ones; within each level the chain walks in reverse registration order. The first `Some` claims the response and stops the walk.
+Handlers are consulted from the most specific outwards: method, then service, then global. Within each level the walk is in reverse registration order. The first `Some` claims the answer and stops the walk.
 
 ## Panic recovery
 
-Every pipeline segment runs under panic recovery. A panic never tears down the connection or the process — the server keeps answering subsequent calls:
+Every pipeline segment runs under panic recovery. A panic never tears down the connection or the process — the server keeps answering subsequent calls, and the typed `PanicRecovered` event is offered to the error chain first, so a handler can claim and remap it. The statuses below are what the caller sees when nothing claims:
 
 | Panic in | Wire status | Message carries |
 |---|---|---|
-| Handler body | `Internal` | the panic payload (`handler panicked: ...` when unclaimed) |
-| Guard | `PermissionDenied` | `guard N panicked: ...` — matches the "guard said no" semantic |
+| Handler body | `Internal` | `handler panicked: ...` |
+| Guard | `Internal` | `guard N panicked: ...` |
 | Interceptor | `Internal` | `interceptor panicked: ...` |
-| Error handler | none — the handler is skipped | chain continues; the original error is kept |
+| Error handler | none — that handler is skipped | the chain continues; the original error stands |
 
-Handler panics go through the error-handler chain like ordinary errors, so a handler can claim and remap them; the statuses above are the defaults when nothing claims.
+A guard that panics is a bug, not a verdict, which is why it answers `Internal` and not `PermissionDenied`. `PermissionDenied` belongs to a guard *rejection* — the `GuardRejection` event, which also reaches the chain first.
 
-## Error observers
+The one panic the chain cannot be offered is a panic inside the chain itself. That one is logged at `error!`, because nothing else can answer for it; events the chain can reach are narrated at `debug` instead.
 
-Every error entering the chain, every guard rejection, and every recovered panic fans out to the observers registered with `use_global_error_observer` before any remapping happens — the observer sees the original event (including typed `GuardRejection` and `PanicRecovered`), regardless of what the chain returns to the client.
+## Extraction failures
+
+A parameter that cannot be extracted fails the call with `Internal` carrying the reason, and does not reach the error chain: asking for a message on a method whose caller streams, or for a `Payload<T>` whose `T` is not that method's request type, is a fault in the handler's declaration rather than in the call. The message names both the type asked for and the type the call carries.
+
+## Outside toni's dispatch
+
+A service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services) has no chain behind it. `toni_grpc::to_status(e)` is the hop from a domain error to a `tonic::Status` there:
+
+```rust
+let order = self.orders.create(req).map_err(toni_grpc::to_status)?;
+```
+
+For a bare `?`, give the error type the impl in the crate that owns it:
+
+```rust
+impl From<OrderError> for tonic::Status {
+    fn from(e: OrderError) -> Self {
+        toni_grpc::to_status(e)
+    }
+}
+```
+
+Either form keeps the domain error on the status's source slot. What such a service has no access to is the chain itself: nothing offers that error to a handler, because the call never entered toni's dispatch.

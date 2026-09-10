@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: From a .proto file to a running gRPC server with DI — proto compilation, #[grpc_service], #[grpc_methods], and module wiring.
+description: "From a .proto file to a running gRPC server with DI — proto compilation, the toni-build step, #[controller] + #[grpc_methods], and module wiring."
 ---
 
 This walkthrough builds a single-method gRPC service backed by an injected provider. Dependencies are listed in the [overview](/docs/grpc#installation).
@@ -31,16 +31,23 @@ message CreateOrderResponse { uint64 id = 1; string status = 2; }
 
 ### Compile it in build.rs
 
-```rust
+Two steps, in order. `tonic-prost-build` compiles the proto into messages and a service trait; `toni_build::shapes` then reads that trait and writes what each method carries beside it.
+
+```rust title="build.rs"
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::compile_protos("proto/orders.proto")?;
+    toni_build::shapes("toni_examples.orders")?;
     Ok(())
 }
 ```
 
-This requires `protoc` on the build machine. To vendor it instead (via the `protoc-bin-vendored` build-dependency):
+`shapes` takes the same string `tonic::include_proto!` takes, and rewrites the file that macro includes in place: for a service `Orders` it appends an `orders_toni` module of marker types beside the `orders_server` module tonic wrote, one per rpc. `#[grpc_methods]` projects each method's request type through those markers — a macro runs before name resolution and cannot resolve a type it reads off a handler, so this is where the wire shape comes from. Skip the line and the macro expands to a path that does not exist.
 
-```rust
+Re-running is safe: a second `shapes` call replaces its own section rather than appending another. A file with no service trait in it is an error, not a no-op.
+
+The first step requires `protoc` on the build machine. To vendor it instead (via the `protoc-bin-vendored` build-dependency):
+
+```rust title="build.rs"
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protoc = protoc_bin_vendored::protoc_bin_path()?;
     // SAFETY: build.rs is single-threaded; setting an env var here is fine.
@@ -48,36 +55,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("PROTOC", protoc);
     }
     tonic_prost_build::compile_protos("proto/orders.proto")?;
+    toni_build::shapes("toni_examples.orders")?;
     Ok(())
 }
 ```
+
+For a trait tonic did not write — hand-written, or built through `tonic_build::manual` — use `toni_build::shapes_in_file(path)` and point it at the file that holds the trait.
 
 </Step>
 
 <Step>
 
-### Implement the service
+### Write the service
 
-`tonic::include_proto!` pulls the generated code into a module. The generated trait (`Orders`) is what your service implements; the generated server wrapper (`OrdersServer`) must be in scope because the macro-generated registration code names it — user code never calls it.
+`tonic::include_proto!` pulls the generated code into a module. The service is a `#[controller]` struct; its handlers go in an inherent impl marked with the proto trait they serve.
 
 ```rust
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use toni::ToniFactory;
-use toni_macros::{grpc_methods, grpc_service, injectable, module, new};
+use toni::extractors::Payload;
+use toni::{controller, grpc_methods, injectable, module, new, ToniFactory};
 
 mod orders_pb {
     tonic::include_proto!("toni_examples.orders");
 }
-use orders_pb::orders_server::{Orders, OrdersServer};
 
 // An ordinary provider — nothing gRPC-specific about it.
 #[injectable]
 pub struct OrdersCounter {
     seq: Arc<AtomicU64>,
 }
+
 impl OrdersCounter {
     #[new]
     pub fn new() -> Self {
@@ -89,44 +99,63 @@ impl OrdersCounter {
     }
 }
 
-// The struct definition lives inside the attribute; #[inject] fields
-// resolve from the module's providers. The impl block carries the
-// constructor.
-#[grpc_service(pub struct OrdersGrpcService {
-    #[inject] counter: OrdersCounter,
-})]
-impl OrdersGrpcService {
-    pub fn new(counter: OrdersCounter) -> Self {
-        Self { counter }
+// The failure a handler answers with. `kind()` decides the wire code:
+// BadRequest is INVALID_ARGUMENT here, 400 on HTTP.
+#[derive(Debug, toni::Error)]
+enum OrderError {
+    #[error_kind(BadRequest)]
+    InvalidQty { qty: u32 },
+}
+
+impl std::fmt::Display for OrderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidQty { qty } => write!(f, "qty must be positive, got {qty}"),
+        }
     }
 }
 
-// #[grpc_methods] goes on the proto-trait impl (it errors on inherent
-// impls). It wraps every method with the enhancer pipeline and registers
-// the service with the adapter at bind time.
-#[grpc_methods]
-#[tonic::async_trait]
-impl Orders for OrdersGrpcService {
+impl std::error::Error for OrderError {}
+
+// #[inject] fields resolve from the module's providers.
+#[controller]
+pub struct OrdersGrpcService {
+    #[inject]
+    counter: OrdersCounter,
+}
+
+// The proto trait is the argument. The macro writes the trait impl around
+// these handlers and registers the service with the adapter at bind time.
+#[grpc_methods(orders_pb::orders_server::Orders)]
+impl OrdersGrpcService {
+    #[grpc_method]
     async fn create(
         &self,
-        request: tonic::Request<orders_pb::CreateOrderRequest>,
-    ) -> Result<tonic::Response<orders_pb::CreateOrderResponse>, tonic::Status> {
-        let req = request.into_inner();
+        Payload(req): Payload<orders_pb::CreateOrderRequest>,
+    ) -> Result<orders_pb::CreateOrderResponse, OrderError> {
         if req.qty == 0 {
-            return Err(tonic::Status::invalid_argument("qty must be positive"));
+            return Err(OrderError::InvalidQty { qty: req.qty });
         }
-        let id = self.counter.next_id();
-        Ok(tonic::Response::new(orders_pb::CreateOrderResponse {
-            id,
+        Ok(orders_pb::CreateOrderResponse {
+            id: self.counter.next_id(),
             status: format!("created:{}", req.item),
-        }))
+        })
     }
 }
 ```
 
-`#[grpc_service]` makes the struct a dispatch target — declared in a module's `controllers` list, like an HTTP or RPC controller, and not injectable. It is a singleton unless a dependency is request-scoped, in which case it auto-elevates and is built per call. `#[grpc_methods]` emits the tonic registration — there is no `OrdersServer::new(...)` and no `adapter.add_service(...)` in user code; the `controllers` entry is the entire wiring story.
+Four rules govern that impl:
 
-By convention the server wrapper is inferred from the trait name: a trailing `Service` is stripped and `Server` appended (`Orders` → `OrdersServer`, `OrdersService` → `OrdersServer`), resolved in the trait's parent path. When the tonic-generated wrapper lives elsewhere or has a non-standard name, point at it explicitly: `#[grpc_methods(server = path::to::OrdersServer)]`.
+- **Each handler is marked.** `#[grpc_method]` for a single reply, `#[grpc_stream]` for a streaming one. Anything unmarked stays exactly as written — the constructor, `#[on_*]` lifecycle hooks, private helpers.
+- **Every rpc the proto declares needs a handler.** The generated trait has no default bodies, so a missing one is an unimplemented-trait error at the impl.
+- **Every parameter is an extractor**, in any order: `Payload<T>` for the message, `Inbound<T>` for the caller's stream, `Extensions` for the execution's bag, `toni_grpc::GrpcRequest<T>` for the whole tonic request, or any [custom extractor](/docs/extractors/custom) over `GrpcContext`. The one parameter the macro reads by spelling is `&GrpcContext`, which passes through as the context itself rather than being extracted from it. Those first three all take the request, and it is taken once: two of them in one handler is a compile error naming both.
+- **The answer is your own type.** The reply message, or `Result<Reply, E>` where `E` implements `toni::Error`. Return `tonic::Response<T>` instead of the bare reply to set reply metadata; drop the `Result` entirely for a handler that cannot fail.
+
+Nothing needs importing from the generated module. The macro names the trait's siblings — the `OrdersServer` wrapper and the `orders_toni` shapes — through the qualified path in the attribute.
+
+`#[controller]` makes the struct a dispatch target: it goes in a module's `controllers` list like an HTTP or RPC controller, and it is not injectable. It is a singleton unless a dependency is request-scoped, in which case it auto-elevates and is built per call. There is no `OrdersServer::new(...)` and no `adapter.add_service(...)` in user code; the `controllers` entry is the entire wiring story.
+
+Two attribute options cover a generated layout that differs from the usual one. `#[grpc_methods(orders_pb::orders_server::Orders, server = path::to::OrdersServer)]` points at a wrapper with a non-standard name or location, and `shapes = path::to::orders_toni` points at a companion module written somewhere other than beside the trait.
 
 </Step>
 

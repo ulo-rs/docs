@@ -1,21 +1,28 @@
 ---
 title: Enhancers
-description: Guards and interceptors on gRPC services — GrpcContext, service- and method-level stacking, and the no-pipes rule.
+description: Guards, interceptors and error handlers on gRPC services — GrpcContext, global/service/method stacking, and what each stage can read.
 ---
 
 Guards, interceptors, and error handlers are ordinary DI providers applied to a `#[grpc_methods]` impl via `#[use_*]` attributes — at the impl level (every method) or per method:
 
 ```rust
-#[grpc_methods]
-#[tonic::async_trait]
+#[grpc_methods(orders_pb::orders_server::Orders)]
 #[use_guards(AuthGuard)]                       // every method
 #[use_error_handlers(QtyErrorHandler)]         // every method
-impl Orders for OrdersGrpcService {
+impl OrdersGrpcService {
+    #[grpc_method]
     #[use_guards(AdminGuard)]                  // this method only
     #[use_interceptors(LoggingInterceptor)]
-    async fn create(&self, /* ... */) { /* ... */ }
+    async fn create(
+        &self,
+        Payload(req): Payload<orders_pb::CreateOrderRequest>,
+    ) -> Result<orders_pb::CreateOrderResponse, OrderError> {
+        // ...
+    }
 }
 ```
+
+Placement matters. `#[grpc_methods]` consumes the enhancer attributes, so they sit **below** it on the impl, or on a handler method inside it. An enhancer attribute written above the handler macro expands first and is gone before the handler macro runs; that is a compile error naming the placement.
 
 Each provider registers by implementing the corresponding trait against `GrpcContext` — there is no marker attribute. Declare `#[injectable]`, implement the trait, list the provider in the module, apply with `#[use_*]`.
 
@@ -23,35 +30,51 @@ The pipeline per call: guards → interceptors → handler → error handlers (o
 
 ## GrpcContext
 
-gRPC payloads are method-typed protobuf messages and can't sit in a non-generic struct, so `GrpcContext` holds only what every enhancer can name without a type parameter — there is no request body on it:
+gRPC payloads are method-typed protobuf messages and can't sit in a non-generic struct, so `GrpcContext` holds only what every enhancer can name without a type parameter. The message is not on it — that rides in a slot a handler parameter takes.
 
 | Accessor | Returns |
 |---|---|
-| `method()` | `&str` — proto trait + Rust method name, e.g. `"Orders/create"` |
+| `method()` | `&str` — the path the caller dialled, `package.Service/Method` |
 | `headers()` | the inbound metadata map (`&HashMap<String, String>`) |
 | `header(key)` | `Option<&str>` |
 | `peer()` | `Option<SocketAddr>` |
+| `deadline()` | `Option<Instant>` — when the caller stops waiting |
 
-Only ASCII metadata is captured into `headers()`; binary (`-bin`) entries are skipped. `GrpcContext` also implements `HandlerContext`, and `metadata()`, `extensions()`, `cache()`, and `cancellation()` work as on the other transports.
+Only ASCII metadata is captured into `headers()`; binary (`-bin`) entries are skipped, and a handler that needs them takes `toni_grpc::GrpcRequest<T>` and reads tonic's own map. `GrpcContext` also implements `HandlerContext`, so `metadata()`, `extensions()`, `cache()`, `cancellation()`, and `deadline()` work as on the other transports.
 
-`metadata()` is not the wire metadata — that is `headers()`. It returns what `#[set_metadata]` declared: the attribute goes on the `#[grpc_methods]` impl (every method) or on an individual method, and guards, interceptors, and error handlers read it back through `ctx.metadata()`. The handler never sees it.
+`deadline()` is read from the caller's `grpc-timeout` at the start of the call, so every stage sees the same instant rather than each recomputing from a clock that has moved. gRPC is the only transport whose wire carries how long the caller intends to wait; the other three answer `None`. It reports — tonic is what enforces the deadline — so a guard can refuse work it cannot finish in time, and a handler can budget against the caller's patience instead of a number it picked.
 
-The handler never sees the context at all — it keeps the plain tonic signature. To hand a value from an enhancer to the handler, insert it into `ctx.extensions()` (the bag mutates through `&self`); the macro rides the bag on the tonic request, and the handler adopts it from there:
+`metadata()` is not the wire metadata — that is `headers()`. It returns what `#[set_metadata]` declared: the attribute goes on the `#[grpc_methods]` impl (every method) or on an individual method, and guards, interceptors, error handlers, and any handler taking `&GrpcContext` read it back.
+
+## Reaching the handler from an enhancer
+
+Insert into `ctx.extensions()`, which mutates through `&self`. The handler takes the bag as a parameter — `Extensions` is an extractor like any other — or reaches it through `&GrpcContext`:
 
 ```rust
 // in a guard or interceptor
 ctx.extensions().insert(AuthenticatedUser { id });
 
 // in the handler
-let user = toni::context::Extensions::adopt(request.extensions())
-    .get::<AuthenticatedUser>();
+#[grpc_method]
+async fn create(
+    &self,
+    extensions: Extensions,
+    Payload(req): Payload<orders_pb::CreateOrderRequest>,
+) -> Result<orders_pb::CreateOrderResponse, OrderError> {
+    let user: Option<AuthenticatedUser> = extensions.get();
+    // ...
+}
 ```
 
-Note the naming split: `#[use_*]` attributes key on the bare Rust method name (`create`), `ctx.method()` returns `"Orders/create"`, and the tracing span's `pattern` field carries the full wire path (`"toni_examples.orders.Orders/Create"`).
+It is one bag per execution, not one per parameter, which is why what the guard wrote is there.
+
+`GrpcContext::of(request.extensions())` and `Extensions::adopt(request.extensions())` read the same things off a `tonic::Request`. They are for a service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services), outside toni's dispatch — a `#[grpc_methods]` handler asks for what it needs by parameter.
+
+Note the naming split: `#[use_*]` attributes and the per-method enhancer maps key on the bare Rust method name (`create`), while `ctx.method()` and the tracing span's `pattern` field both carry the wire path (`"toni_examples.orders.Orders/Create"`).
 
 ## Guards
 
-A guard implements `Guard<GrpcContext>`. The resolved chain runs before the handler; a `false` return short-circuits the call with `PermissionDenied`:
+A guard implements `Guard<GrpcContext>`:
 
 ```rust
 use toni::GrpcContext;
@@ -69,7 +92,11 @@ impl Guard<GrpcContext> for AuthGuard {
 }
 ```
 
+The resolved chain runs before the handler. A `false` return raises a `GuardRejection`, which is offered to the error-handler chain first; unclaimed, it renders as `PermissionDenied`. A guard that *panics* is a bug rather than a verdict: the `PanicRecovered` event goes to the chain the same way, and unclaimed renders `Internal` — the caller is not told its credentials were refused.
+
 Method-level guards **stack on** service-level guards, service level first. With `#[use_guards(AuthGuard)]` on the impl and `#[use_guards(AdminGuard)]` on `create`, a call to `create` must pass both; other methods only need `AuthGuard`.
+
+A guard cannot read the message. The request is installed on the execution by the generated method, after the guards have answered, so what a guard has is the path, the headers, the deadline and the peer. Rejecting on the message's contents belongs in the handler, or in an [extractor](/docs/extractors/custom) the handler takes.
 
 ## Interceptors
 
@@ -119,11 +146,20 @@ impl Interceptor<GrpcContext, GrpcHandlerResult> for DenyInterceptor {
 }
 ```
 
-## No pipes
+## Globals
 
-`#[use_pipes]` is not supported on `#[grpc_methods]`. The proto payload is method-typed and can't sit in the non-generic `GrpcContext`, and a headers-only pipe adds no expressive power over interceptors. Inbound headers are read-only; to hand data to a later stage or the handler, attach it to `ctx.extensions()`.
+Three registrars on `ToniFactory` attach an enhancer to every gRPC method in the application, whatever service declares it:
 
-## Scope and globals
+```rust
+let mut factory = ToniFactory::new();
+factory.use_global_grpc_guards(Arc::new(TenantGuard));
+factory.use_global_grpc_interceptors(Arc::new(MetricsInterceptor));
+factory.use_global_grpc_error_handler(Arc::new(EnvelopeHandler));
+let mut app = factory.create_with(AppModule).await?;
+```
 
-- **Request-scoped enhancers work.** A gRPC call is an execution like any other: an enhancer (or service) with request-scoped dependencies is built per call, and init/bootstrap hooks fire on that instance.
-- **There is no global registration for gRPC enhancers** — no gRPC counterpart to `use_global_http_guards` and friends. Enhancers attach at the impl or method level. `use_global_error_observer` does apply: observers see gRPC guard rejections, errors, and recovered panics like on every other transport.
+Global enhancers stack outside the service's own: guards run global → service → method, and a global guard rejecting stops the call before the service's guard is asked. Interceptors wrap in the same direction, so a global one is the outermost link. Error handlers are consulted in the opposite direction — method, then service, then global — so the most specific claim wins; see [chain order](/docs/grpc/error-handling#chain-order).
+
+## Scope
+
+A gRPC call is an execution like any other. An enhancer or a service with request-scoped dependencies is built per call, and its init hooks fire on that instance. Everything resolved during one call shares one `ExecutionCache`, so a request-scoped provider injected in two places is constructed once.
