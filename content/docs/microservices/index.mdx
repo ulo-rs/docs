@@ -33,7 +33,7 @@ app.start().await?;
 
 An application holds one RPC adapter — a second `use_rpc_adapter` call replaces the first. To serve the same controllers over two transports, create two application instances from the same module.
 
-gRPC is not part of this layer: it is contract-first and streaming, which does not fit the pattern-string + payload model. It registers separately via `use_grpc_adapter` with the `toni-grpc` crate.
+gRPC is not part of this layer: it is contract-first — services and messages are declared in `.proto` files and known at compile time — which does not fit the pattern-string + payload model. It registers separately via `use_grpc_adapter` with the `toni-grpc` crate.
 
 ## Message routing
 
@@ -44,13 +44,14 @@ Two handler kinds exist:
 | Annotation | Direction | Handler return |
 |---|---|---|
 | `#[message_pattern("op")]` | Request-response — a reply is sent back | `Result<T, RpcError>` where `T` is `RpcData` or any `Serialize` type |
+| `#[message_pattern("op")]` | Request-response, many replies | `RpcHandlerResult` — the output passes through untouched, which is how a handler [streams](/docs/microservices/rpc-controllers#streaming-replies) |
 | `#[event_pattern("op")]` | Fire-and-forget — no reply | `Result<(), RpcError>` |
 
 Handlers, payload typing, errors, and enhancers are covered in [RPC Controllers](/docs/microservices/rpc-controllers).
 
-## Calling remote services
+## Calling another service
 
-To call another service, inject an `RpcClient` and use `send` (request-response) or `emit` (fire-and-forget). Construct it with any client transport and register it under a token:
+There is no client module to import. A client is one expression — a transport wrapped in an `RpcClient` — registered as an ordinary provider under a string token:
 
 ```rust
 use toni::{provider_value, RpcClient};
@@ -68,6 +69,8 @@ use toni_tcp::TcpClientTransport;
 struct AppModule;
 ```
 
+Inject it by that token wherever a service makes the call:
+
 ```rust
 #[injectable]
 pub struct InventoryService {
@@ -76,16 +79,30 @@ pub struct InventoryService {
 }
 
 impl InventoryService {
-    pub async fn get_order(&self, id: u64) -> anyhow::Result<serde_json::Value> {
-        let order = self.orders
+    pub async fn get_order(&self, id: u64) -> Result<serde_json::Value, RpcClientError> {
+        self.orders
             .send_json("order.get", &serde_json::json!({ "id": id }))
-            .await?;
-        Ok(order)
+            .await
     }
 }
 ```
 
-Every client transport connects lazily on first use and defaults to a 5-second request-response timeout, overridable with `with_timeout`. The full client API — typed helpers, per-call headers, `connect`/`close` — is documented in [RPC Controllers](/docs/microservices/rpc-controllers#rpcclient).
+The token is what makes room for more than one: two clients of the same transport, or one transport pointed at two peers, differ only in the string they register under. When the address comes from configuration rather than a literal, register through a factory that takes the dependency it needs:
+
+```rust
+use toni::{provider_factory, RpcClient};
+use toni_nats::NatsClientTransport;
+
+provider_factory!("ORDERS_CLIENT", |config: ConfigService<AppConfig>| {
+    RpcClient::new(NatsClientTransport::new(config.get_ref().nats_url.clone()))
+})
+```
+
+`send` is request-response, `emit` is fire-and-forget, and `stream` opens a call whose reply is a sequence of frames. Every client transport connects lazily on the first call and defaults to a 5-second request-response timeout, overridable with `with_timeout`. A peer that is down cannot fail your boot; reaching a dead peer is an ordinary error at the call site. Call `connect()` in an `#[on_application_bootstrap]` hook when you would rather learn at startup.
+
+Forwarding an inbound call's headers to an outbound one is a per-call decision: the handler holds the context, reads `ctx.headers()`, and attaches what it wants through `request(pattern).header(...)`. Nothing propagates on its own.
+
+The full client API — typed helpers, per-call headers, streaming, `connect`/`close` — is documented in [RPC Controllers](/docs/microservices/rpc-controllers#rpcclient).
 
 ## Available transports
 
@@ -102,5 +119,7 @@ Each transport ships as its own crate with a server adapter and a client transpo
 | [Kafka](/docs/microservices/kafka-adapter) | `toni-kafka` | topic | `toni-reply-to` / `toni-correlation-id` headers |
 
 TCP and UDP are broker-less — the adapter is the server. The other five require the respective broker to be reachable from both sides.
+
+All seven carry [streaming replies](/docs/microservices/rpc-controllers#streaming-replies) with the same frame grammar. What differs is how a caller says it has walked away: TCP and UDP send a cancel frame in-band on the call's own connection or socket, while the five broker transports publish the notice to a shared channel — `toni.rpc.cancel` on NATS, RabbitMQ and Kafka, `toni:rpc:cancel` on Redis, `toni/rpc/cancel` on MQTT — that every server instance listens to. Each transport page states its own.
 
 Instead of binding their own socket, the TCP and UDP adapters can adopt one the caller already bound — `TcpAdapter::from_listener` / `UdpAdapter::from_socket` — for socket activation and zero-downtime restarts; see [Bind targets](/docs/techniques/bind-targets).

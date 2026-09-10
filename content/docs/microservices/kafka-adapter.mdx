@@ -44,7 +44,7 @@ The server consumes in a consumer group (default `toni-rpc-server`). Instances s
 
 ## How patterns map to topics
 
-Each pattern is one topic; routing matches the received record's topic against the registered patterns. At startup the adapter pre-creates the pattern topics (1 partition, replication factor 1) so partition assignment happens at group join instead of after a metadata refresh. Pre-creation is best-effort: existing topics are fine, and on failure the broker's auto-create (`auto.create.topics.enable`) is the fallback. Create topics out of band when specific partition counts or replication are needed.
+Each pattern is one topic; routing matches the received record's topic against the registered patterns. At startup the adapter pre-creates the pattern topics (1 partition, replication factor 1) so partition assignment happens at group join instead of after a metadata refresh. Pre-creation is best-effort: existing topics are fine, and on failure the broker's auto-create (`auto.create.topics.enable`) is the fallback. Create topics out of band when specific partition counts or replication are needed — and include `toni.rpc.cancel`, which the adapter consumes but does not pre-create.
 
 ## Wire behavior
 
@@ -54,6 +54,14 @@ Each pattern is one topic; routing matches the received record's topic against t
 - **Headers** — every record header other than the two reserved keys becomes `ctx.headers()`; per-call headers from the client travel the same way.
 
 Reply framing matches the other transports: `{"response": ...}` on success (handler errors inside as the canonical envelope), `{"err": {"message": ..., "status": ...}}` for dispatch failures, raw bytes for `RpcData::Binary` replies. See [Errors on the wire](/docs/microservices/rpc-controllers#errors-on-the-wire).
+
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) produces one record per frame to the reply topic — `{"stream": ...}` items closed by `{"end": true}`. Each record is **keyed by the correlation id**, so every frame of one call lands on one partition and the caller reads them in the order the handler produced them.
+
+Cancel notices go to the topic `toni.rpc.cancel`, keyed by `toni-correlation-id`. Each server instance consumes that topic in a consumer group of its own — instances in the pattern group share the request partitions, but every instance has to see every notice, because only the one holding the call can act on it.
+
+Client correlation ids are `{reply topic}:{n}`. The reply topic is unique to a transport instance, so ids stay globally unique and the server's shared cancel registry cannot confuse two callers.
 
 ## Client transport
 
@@ -67,7 +75,7 @@ provider_value!(
 )
 ```
 
-Connection is lazy on first use. Each transport instance creates a private reply topic, `toni.rpc.reply.{pid}-{nanos}`, and consumes it in its own unique group with `auto.offset.reset=earliest` — so a reply produced before partition assignment completes is still delivered. A background router matches replies to waiting calls by correlation id. Produce calls (both `send` and `emit`) have a 5-second delivery timeout.
+Connection is lazy on first use. Each transport instance creates a private reply topic, `toni.rpc.reply.toni-kafka-client-{pid}-{nanos}`, and consumes it in its own unique group with `auto.offset.reset=earliest` — so a reply produced before partition assignment completes is still delivered. A background router matches replies to waiting calls by correlation id. Produce calls (both `send` and `emit`) have a 5-second delivery timeout.
 
 ### Custom timeout
 
@@ -85,7 +93,7 @@ RpcClient::new(
 ## Operational limits
 
 - Request-response over a log trades latency for Kafka's durability and scaling — expect broker round-trips well above the socket transports; the 5-second default timeout is sized accordingly.
-- Reply topics accumulate: each client transport instance creates one (`toni.rpc.reply.{pid}-{nanos}`, 1 partition / RF 1) and nothing cleans them up on exit — configure broker-side retention or delete them out of band.
+- Reply topics accumulate: each client transport instance creates one (`toni.rpc.reply.toni-kafka-client-{pid}-{nanos}`, 1 partition / RF 1) and nothing cleans them up on exit — configure broker-side retention or delete them out of band.
 - Offsets are committed automatically (`enable.auto.commit=true`); consumption is not tied to handler success — a handler error does not requeue the message.
 - No drain timeout or in-flight cap — each record spawns an unbounded task; shutdown stops the consumer without waiting for in-flight handlers.
 - No per-request tracing span; `BoundAdapters.rpc` is `None`.

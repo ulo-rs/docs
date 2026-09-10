@@ -21,6 +21,10 @@ app.use_rpc_adapter(NatsAdapter::new("nats://127.0.0.1:4222")).unwrap();
 app.start().await.unwrap();
 ```
 
+Beyond the pattern subjects, the adapter subscribes `toni.rpc.cancel` — the subject carrying stream-cancel notices — without a queue group, so every instance sees every notice and only the one holding the call acts on it.
+
+The connection and every subscription are made inside the serve loop, not during `bind()`. A broker that is never reachable panics the serve task after `app.bind()` has already reported success.
+
 ---
 
 ## NatsClientTransport
@@ -34,6 +38,8 @@ NatsClientTransport::new(servers: impl IntoNatsServers) -> NatsClientTransport
 NatsClientTransport::new(...).with_timeout(Duration) -> NatsClientTransport  // default: 5 s
 ```
 
+`with_timeout` bounds the whole round trip on `send`. On a streaming call it bounds the gap to the next frame, the first frame included; expiry arrives as an `Err(RpcClientError::Timeout)` item and publishes the cancel notice.
+
 Wrap in `RpcClient` and register as a provider:
 
 ```rust
@@ -44,6 +50,17 @@ provider_value!(
 ```
 
 `close()` (via `RpcClient::close`) flushes pending publishes before returning — call it at shutdown so in-flight data is not lost.
+
+### Streaming calls
+
+```rust
+open_stream(pattern: &str, data: RpcData, metadata: HashMap<String, String>)
+    -> Result<RpcReplyStream, RpcClientError>
+```
+
+`RpcClient::stream` / `RpcRequest::stream` call it. `send` uses the broker's native request; a stream needs an inbox that outlives the first message, so `open_stream` subscribes one explicitly and publishes the request with that inbox as its reply-to.
+
+The returned `RpcReplyStream` yields `Result<RpcData, RpcClientError>` until the server's end marker. Dropping it before that — or letting the per-frame gap expire — publishes `{"cancel": true, "key": "<inbox>"}` to `toni.rpc.cancel`, and the server aborts the call.
 
 ### Per-call headers
 
@@ -99,10 +116,25 @@ The NATS adapter publishes JSON to the reply-to inbox in the same format as the 
 {"response": {"status": "error", "kind": "NotFound", "message": "...", "details": {...}}}
 ```
 
-**Framework errors** — only `PatternNotFound`, `Forbidden`, and `Internal` (including handler panics) produce a wire-error frame, with lowercase statuses `not_found`, `forbidden`, `error`:
+**Recovered panic** — a panic in a guard, an interceptor or the handler body is caught and answered on the same lane as any other error the pipeline produced:
+
+```json
+{"response": {"status": "error", "kind": "Internal", "message": "panic recovered in handler: ..."}}
+```
+
+**Framework errors** — the wire-error frame is written when dispatch itself failed and there is no handler answer to render: an unrouted pattern (`not_found`), a guard rejection no error handler claimed (`forbidden`), or an interceptor returning an `Err` of its own (`error`). A handler's own `RpcError::Internal` is not on this lane.
 
 ```json
 {"err": {"message": "...", "status": "not_found"}}
 ```
 
-`NatsClientTransport` returns `Ok(RpcData)` for `response` frames and `Err(RpcClientError::Remote { message, status })` for `err` frames. JSON without either key is returned as-is; non-JSON payloads come back as `RpcData::Binary`.
+**Stream frames** — a streaming reply publishes item frames to the reply inbox, closed by an end marker:
+
+```json
+{"stream": {...}}
+{"stream_b64": "AAEC"}
+{"end": true}
+{"end": true, "err": {"message": "...", "status": "error"}}
+```
+
+`NatsClientTransport::send` returns `Ok(RpcData)` for `response` frames and `Err(RpcClientError::Remote { message, status })` for `err` frames. JSON without either key is returned as-is, and a stream frame is JSON of exactly that kind — so call a streaming handler with `stream`, which reads the frames as frames. Non-JSON payloads come back as `RpcData::Binary`.

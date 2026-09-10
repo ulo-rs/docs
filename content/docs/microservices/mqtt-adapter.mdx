@@ -45,6 +45,16 @@ Each pattern subscribes to a topic with the pattern string as its name — exact
 
 Reply framing matches the other transports: `{"response": ...}` on success (handler errors inside as the canonical envelope), `{"err": {"message": ..., "status": ...}}` for dispatch failures, raw bytes for `RpcData::Binary` replies. See [Errors on the wire](/docs/microservices/rpc-controllers#errors-on-the-wire).
 
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the request's `response_topic`, echoing its `correlation_data` — `{"stream": ...}` items closed by `{"end": true}`.
+
+Cancel notices go to the topic `toni/rpc/cancel` at QoS 1, keyed by the call's correlation data. Every server instance subscribes it, so each sees every notice and only the instance holding the call acts on it.
+
+<Callout type="warn">
+QoS 1 applies to stream frames as it does to everything else: a reconnect can redeliver an item the consumer already saw. A stream consumer here has to tolerate a repeated frame — the correlation data identifies the call, not the position in it.
+</Callout>
+
 ## Client transport
 
 ```rust
@@ -57,7 +67,7 @@ provider_value!(
 )
 ```
 
-Connection is lazy on first use. Each transport instance subscribes one private reply topic, `toni/rpc/reply/{client-id}`, and a background task drives the event loop, routing every reply back to its waiting call by `correlation_data`. The first call waits up to 5 seconds for the reply subscription to be acknowledged before publishing, so a reply cannot outrun the subscription that routes it.
+Connection is lazy on first use. Each transport instance subscribes one private reply topic, `toni/rpc/reply/{client-id}`, where the client id is `toni-mqtt-client-{pid}-{nanos}`. A background task drives the event loop, routing every reply back to its waiting call by `correlation_data`. The first call waits up to 5 seconds for the reply subscription to be acknowledged before publishing, so a reply cannot outrun the subscription that routes it.
 
 ### Custom timeout
 

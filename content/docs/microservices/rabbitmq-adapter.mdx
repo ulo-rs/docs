@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-The initial connection retries for about 10 seconds before panicking. After startup, lapin's auto-recovery reconnects a dropped connection and replays topology — queues are re-declared and consumers resume without manual re-setup.
+The initial connection retries for about 10 seconds before panicking. That connect runs inside the serve loop rather than during `bind()`, so a broker that never comes up panics the serve task after `app.bind()` has already reported success — an unreachable broker is not a startup error you can catch. After startup, lapin's auto-recovery reconnects a dropped connection and replays topology — queues are re-declared and consumers resume without manual re-setup.
 
 ## How patterns map to queues
 
@@ -46,6 +46,12 @@ Multiple server instances consuming the same queues share the work — AMQP dist
 - **Headers** — per-call headers ride in the AMQP headers table, surfacing as `ctx.headers()`. Inbound, string headers pass through verbatim and scalar numbers/booleans are stringified; structured values (arrays, nested tables) are skipped.
 
 Reply framing matches the other transports: `{"response": ...}` on success (handler errors inside as the canonical envelope), `{"err": {"message": ..., "status": ...}}` for dispatch failures, raw bytes for `RpcData::Binary` replies. See [Errors on the wire](/docs/microservices/rpc-controllers#errors-on-the-wire).
+
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the delivery's `reply_to`, each carrying the request's `correlation_id` — `{"stream": ...}` items closed by `{"end": true}`.
+
+Cancel notices travel on a fanout exchange named `toni.rpc.cancel`. Each server instance declares the exchange, binds one exclusive auto-delete queue of its own, and consumes it, so every instance sees every notice and only the one holding the call acts on it. The registry is keyed by `correlation_id`; a client's ids are prefixed with its own connection identity, so two callers on one broker cannot collide.
 
 ## Client transport
 
@@ -80,3 +86,4 @@ RpcClient::new(
 - Queues are declared with default options — non-durable, no TTL, no dead-lettering. The adapter exposes no queue arguments; a broker rejects re-declaration of an existing queue whose arguments differ.
 - No drain timeout or in-flight cap — each delivery spawns an unbounded task; shutdown closes the connection without waiting for in-flight handlers.
 - No per-request tracing span; `BoundAdapters.rpc` is `None`.
+- The cancel exchange and this instance's queue are declared at startup on a **separate channel** from the pattern consumers: a failed topology replay closes the channel it happens on, and that must not take the pattern consumers with it.

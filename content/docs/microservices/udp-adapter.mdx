@@ -71,6 +71,25 @@ Payloads are capped at 65,507 bytes (the UDP maximum):
 - **Outbound reply over the cap** — dropped with an error log; the caller times out.
 - **Client send over the cap** — rejected with `RpcClientError::Transport` before anything is sent.
 
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) is one datagram per frame, each carrying the call's `id`:
+
+```json
+{"id": "42", "stream": {"tick": 1}}
+{"id": "42", "end": true}
+```
+
+`RpcData::Binary` items travel base64-encoded under `stream_b64`. The caller abandons an in-flight call by sending `{"id": "42", "cancel": true}` as a datagram from the same socket; the server keys in-flight calls by source address and `id`, so a cancel from anywhere else is ignored.
+
+An item too large for a datagram ends the stream loudly rather than leaving a gap the caller would read as loss:
+
+```json
+{"id": "42", "end": true, "err": {"message": "stream item exceeds datagram size", "status": "error"}}
+```
+
+Losing a datagram costs more on a stream than on a single call. A lost `end` orphans the caller until its per-frame timeout expires; a lost `cancel` leaves the producer running until its stream completes on its own, because the cancel datagram is the only abandonment signal a connectionless transport has.
+
 ## Client transport
 
 `UdpClientTransport` binds one ephemeral socket connected to the remote address. Request-response uses correlation ids; a background reader routes each reply datagram to the waiting caller:
@@ -100,9 +119,11 @@ UdpClientTransport::new("127.0.0.1", 4000)
 
 A lost datagram surfaces as `RpcClientError::Timeout`. With retries enabled, each attempt sends a fresh correlation id, so a late reply to an earlier attempt is dropped rather than satisfying a later one. Total wall time is bounded by `(retries + 1) × timeout + retries × backoff`. Retries apply to `send` only — `emit` returns as soon as the datagram is written.
 
+Retries also do not apply to a streaming call: a re-sent request could start a second producer, and nothing on the wire would distinguish its frames from the first one's. A lost request datagram therefore surfaces as the first frame's timeout. On a stream, `with_timeout` bounds the gap to the next frame rather than the whole call, and expiry arrives as an `Err(RpcClientError::Timeout)` item.
+
 ## Payload limitations
 
-Same as TCP: the wire format is JSON, so `RpcData::Binary` becomes `null` on the wire. Encode binary data (e.g. base64) into `RpcData::Json` or `RpcData::Text`.
+Same as TCP: the wire format is JSON, so a request payload and a single reply cannot carry `RpcData::Binary` — it becomes `null` on the wire. Encode binary data (e.g. base64) into `RpcData::Json` or `RpcData::Text`. A binary stream item is the exception, travelling base64-encoded under `stream_b64`.
 
 ## Tracing
 

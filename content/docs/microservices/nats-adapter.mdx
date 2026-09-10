@@ -30,7 +30,11 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-The initial connection retries until the server is reachable (`retry_on_initial_connect`), so a slow-starting NATS container does not kill the process. If the connection or a subject subscription ultimately fails, the failure surfaces from `app.bind()` (or `app.start()`) as `StartupError::Adapter { transport: "rpc", .. }`. Connection state changes (connected, disconnected, server errors) are logged.
+The initial connection retries until the server is reachable (`retry_on_initial_connect`), so a slow-starting NATS container does not kill the process. Connection state changes (connected, disconnected, server errors) are logged.
+
+<Callout type="warn">
+The adapter connects and subscribes inside its serve loop, not during `bind()`. A broker it can never reach — or a subject it cannot subscribe — therefore panics the serve task *after* `app.bind()` has already reported success, so an unreachable broker is not a startup error you can catch. All five broker adapters behave this way; only the TCP and UDP adapters acquire their socket during `bind()`.
+</Callout>
 
 ## Multiple servers
 
@@ -62,6 +66,16 @@ Reply framing:
 `RpcData::Text` replies wrap as a JSON string (`{"response": "pong"}`). `RpcData::Binary` replies are published **raw**, with no envelope — the only transport payload shape that round-trips binary unmodified.
 
 Handler errors arrive inside `response` as the canonical envelope; dispatch failures arrive as `{"err": {"message": ..., "status": ...}}` with the lowercase statuses `not_found` / `forbidden` / `error`. See [Errors on the wire](/docs/microservices/rpc-controllers#errors-on-the-wire).
+
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the request's reply inbox — `{"stream": ...}` items closed by `{"end": true}`.
+
+The client opens a stream on an inbox it subscribes explicitly rather than on the broker's native request, because that inbox has to outlive the first message. Dropping the reply stream, or letting its per-frame timeout expire, publishes `{"cancel": true, "key": "<inbox>"}` to the subject `toni.rpc.cancel`. Every server instance subscribes that subject **without** a queue group, so each sees every notice and only the instance holding the call acts on it.
+
+<Callout type="warn">
+Call a streaming handler with `stream`, not `send`. `send` resolves on the first frame it receives and has nowhere to put the rest.
+</Callout>
 
 Test with the NATS CLI:
 
@@ -100,6 +114,8 @@ RpcClient::new(
 ## Operational limits
 
 Unlike the TCP/UDP adapters, the NATS adapter has no drain timeout, no `with_max_inflight` backpressure cap, and no bound local address (`BoundAdapters.rpc` is `None`) — each inbound message spawns an unbounded task, and shutdown does not wait for in-flight handlers. There is no per-request `rpc.request` tracing span either. Broker-side limits (max payload, slow-consumer handling) apply as configured on the NATS server.
+
+Beyond the pattern subjects, the adapter subscribes one subject of its own: `toni.rpc.cancel`, carrying stream-cancel notices. It shows up on the wire and in subject-permission rules, so grant it alongside the patterns.
 
 ## Combining HTTP and NATS
 

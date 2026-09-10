@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-The initial connection retries for about 10 seconds before panicking, so a slow-starting Redis container is tolerated. After startup, the publish side uses a self-reconnecting `ConnectionManager`; the subscription side reconnects and resubscribes itself with a 500 ms backoff when the Pub/Sub connection drops (Redis Pub/Sub has no auto-recovery of its own).
+The initial connection retries for about 10 seconds before panicking, so a slow-starting Redis container is tolerated. That connect runs inside the serve loop rather than during `bind()`, so a Redis that never comes up panics the serve task after `app.bind()` has already reported success — an unreachable broker is not a startup error you can catch. After startup, the publish side uses a self-reconnecting `ConnectionManager`; the subscription side reconnects and resubscribes itself with a 500 ms backoff when the Pub/Sub connection drops (Redis Pub/Sub has no auto-recovery of its own).
 
 ## How patterns map to channels
 
@@ -55,6 +55,12 @@ Both halves are Toni, so calls travel in a JSON request envelope:
 - `metadata` — the per-call headers (`ctx.headers()` on the server); Redis Pub/Sub frames have no header slot of their own, so they ride in the envelope under this key.
 
 Responses published to the reply channel use the same framing as the other transports: `{"response": ...}` on success (handler errors ride inside as the canonical envelope), `{"err": {"message": ..., "status": ...}}` for dispatch failures, `{"response": null}` as the event-handler ack, and raw bytes for `RpcData::Binary` replies. See [Errors on the wire](/docs/microservices/rpc-controllers#errors-on-the-wire).
+
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the request's `reply_to` channel — `{"stream": ...}` items closed by `{"end": true}`.
+
+Dropping the reply stream, or letting its per-frame timeout expire, publishes `{"cancel": true, "key": "<reply channel>"}` to the channel `toni:rpc:cancel`. Every server instance subscribes it, so each sees every notice and only the instance holding the call acts on it.
 
 ### Foreign publishers
 
@@ -93,3 +99,4 @@ RpcClient::new(
 - No drain timeout or in-flight cap — each inbound message spawns an unbounded task; shutdown stops the subscriber loop without waiting for in-flight handlers.
 - No per-request tracing span.
 - `BoundAdapters.rpc` is `None` — the adapter owns no listening socket.
+- Beyond the pattern channels, the adapter subscribes `toni:rpc:cancel` for stream-cancel notices — grant it alongside the patterns wherever channel permissions are configured.

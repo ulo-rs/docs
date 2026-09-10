@@ -83,7 +83,21 @@ Statuses: `not_found`, `forbidden`, `error`, `overloaded` — see [Errors on the
 Two edge cases:
 
 - A frame with an `id` that lands on an `#[event_pattern]` handler gets an explicit ack, `{"id": "42", "response": null}`, so the caller does not time out.
-- A handler panic that escapes the dispatcher yields `{"id": "42", "err": {"message": "internal server error", "status": "error"}}`; the connection stays open.
+- A handler panic is caught and answered as a reply carrying the `Internal` envelope, `{"id": "42", "response": {"status": "error", "kind": "Internal", "message": "panic recovered in handler: ..."}}`; the connection stays open. A panic escaping the dispatcher itself is the last-resort case and yields `{"id": "42", "err": {"message": "internal server error", "status": "error"}}`.
+
+### Streaming replies
+
+A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) is item frames closed by an end marker, every frame carrying the call's `id`:
+
+```json
+{"id": "42", "stream": {"tick": 1}}
+{"id": "42", "stream_b64": "AAEC"}
+{"id": "42", "end": true}
+```
+
+`stream_b64` carries an `RpcData::Binary` item base64-encoded. An abnormal end is `{"id": "42", "end": true, "err": {"message": "...", "status": "error"}}`.
+
+The caller abandons an in-flight call — mid-handler or mid-stream — by sending `{"id": "42", "cancel": true}` on the same connection: the driving task is aborted and the handler's execution hears its cancellation token. A dropped connection cancels everything that connection still had in flight.
 
 Test with netcat:
 
@@ -120,9 +134,13 @@ RpcClient::new(
 )
 ```
 
+For a streaming call the same setting bounds the gap to the next frame, the first frame included. Expiry arrives as an `Err(RpcClientError::Timeout)` item and sends the cancel frame, so the server stops producing.
+
+A `send()` that receives a stream frame fails with `RpcClientError::Transport("streaming reply to a single-reply call — use stream()")` — a single-reply call has nowhere to put the frames that follow.
+
 ## Payload limitations
 
-The wire format is JSON. `RpcData::Binary` payloads are not supported — on the wire they become `null`. Encode binary data (e.g. base64) into `RpcData::Json` or `RpcData::Text` instead.
+The wire format is JSON, so a request payload and a single reply cannot carry `RpcData::Binary` — on the wire it becomes `null`. Encode binary data (e.g. base64) into `RpcData::Json` or `RpcData::Text` instead. A binary *stream item* is the exception: it travels base64-encoded under the `stream_b64` key.
 
 ## Tracing
 
@@ -131,7 +149,7 @@ Every inbound message runs inside an `rpc.request` span with `transport="tcp"`, 
 ## Example
 
 ```rust
-use toni::{injectable, module, new, patterns, rpc_controller, serde_json, ToniFactory};
+use toni::{controller, injectable, module, new, patterns, serde_json, ToniFactory};
 
 #[injectable]
 pub struct OrdersService {}
@@ -141,7 +159,7 @@ impl OrdersService {
     }
 }
 
-#[rpc_controller]
+#[controller]
 pub struct OrdersController {
     #[inject]
     service: OrdersService,

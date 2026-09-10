@@ -43,6 +43,8 @@ TcpClientTransport::new(host: impl Into<String>, port: u16) -> TcpClientTranspor
 TcpClientTransport::new(...).with_timeout(Duration) -> TcpClientTransport  // default: 5 s
 ```
 
+`with_timeout` means two things depending on the call. On `send` it bounds the whole request-response round trip. On a streaming call it bounds the gap to the next frame, the first frame included; expiry arrives as an `Err(RpcClientError::Timeout)` item and sends the cancel frame.
+
 Wrap in `RpcClient` and register as a provider:
 
 ```rust
@@ -53,6 +55,15 @@ provider_value!(
 ```
 
 After a fatal transport error (reader-loop exit, write failure) the cached connection is dropped and the next call reconnects. Requests pending at the moment of failure fail with `RpcClientError::Transport("connection closed")`.
+
+The transport implements the full `RpcClientTransport` surface, streaming included:
+
+```rust
+open_stream(pattern: &str, data: RpcData, metadata: HashMap<String, String>)
+    -> Result<RpcReplyStream, RpcClientError>
+```
+
+`RpcClient::stream` / `RpcRequest::stream` call it. The returned `RpcReplyStream` yields `Result<RpcData, RpcClientError>` until the server's end marker; dropping it before that sends the call's cancel frame, so the server aborts the call and the handler's execution hears its cancellation token. A `send()` that receives a stream frame fails with `RpcClientError::Transport("streaming reply to a single-reply call — use stream()")`.
 
 Attach per-call headers via the request builder; they travel as the `metadata` field on the wire frame:
 
@@ -65,7 +76,7 @@ client.request("order.create")
 
 ### Wire protocol
 
-Newline-delimited JSON (`\n` terminated). Binary payloads are not supported on the TCP wire — use base64 or another encoding inside a JSON string.
+Newline-delimited JSON (`\n` terminated). A request payload and a single reply cannot carry binary on the TCP wire — use base64 or another encoding inside a JSON string. A binary *stream item* is the exception: it travels base64-encoded under the `stream_b64` key.
 
 **Request-response inbound** (`metadata` optional; string values surface as handler headers via `ctx.headers()`):
 ```json
@@ -82,10 +93,25 @@ Newline-delimited JSON (`\n` terminated). Binary payloads are not supported on t
 {"id": "1", "response": {"status": "error", "kind": "NotFound", "message": "...", "details": {...}}}
 ```
 
-**Framework error** — only `PatternNotFound`, `Forbidden`, and `Internal` (including handler panics) produce a wire-error frame, with lowercase statuses `not_found`, `forbidden`, `error` (plus `overloaded` for backpressure rejections):
+**Recovered panic** — a panic in a guard, an interceptor or the handler body is caught and answered on the same lane as any other error the pipeline produced:
+```json
+{"id": "1", "response": {"status": "error", "kind": "Internal", "message": "panic recovered in handler: ..."}}
+```
+
+**Framework error** — the wire-error frame is written when dispatch itself failed and there is no handler answer to render: an unrouted pattern (`not_found`), a guard rejection no error handler claimed (`forbidden`), an interceptor returning an `Err` of its own (`error`), or a backpressure rejection (`overloaded`). A handler's own `RpcError::Internal` is not on this lane.
 ```json
 {"id": "1", "err": {"message": "...", "status": "not_found"}}
 ```
+
+**Stream frames** — a streaming reply is item frames closed by an end marker, every frame carrying the call's `id`:
+```json
+{"id": "1", "stream": {...}}
+{"id": "1", "stream_b64": "AAEC"}
+{"id": "1", "end": true}
+{"id": "1", "end": true, "err": {"message": "...", "status": "error"}}
+```
+
+The caller cancels an in-flight call with `{"id": "1", "cancel": true}` on the same connection; a dropped connection cancels everything it still had in flight.
 
 **Fire-and-forget inbound (no `id`):**
 ```json
