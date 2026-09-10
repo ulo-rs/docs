@@ -5,7 +5,7 @@ description: What Toni is, why it exists, and when to reach for it.
 
 Toni is a Rust framework for building server-side applications. It brings a structured, modular approach to Rust web development: your application is organized into **modules**, each containing **controllers** that handle HTTP routes and **services** that hold business logic. Dependencies flow between them through a built-in injection container.
 
-If you have built applications with NestJS, most of Toni has a direct counterpart — modules, controllers, injectable providers, and the guard/interceptor/pipe chain. [Coming from NestJS](/docs/coming-from-nestjs) maps the two, ports a small application line by line, and lists the places where Toni diverges.
+If you have built applications with NestJS, most of Toni has a direct counterpart — modules, controllers, injectable providers, and the guard/interceptor chain. [Coming from NestJS](/docs/coming-from-nestjs) maps the two, ports a small application line by line, and lists the places where Toni diverges.
 
 ## Why Toni exists
 
@@ -26,7 +26,7 @@ Toni is not an HTTP server. It does not handle the actual socket connections, TL
 | **Injectable / Service** | A struct managed by the DI container; injected where needed |
 | **Guard** | Runs before a handler; blocks the request if it returns `false` |
 | **Interceptor** | Wraps a handler; can transform request and response |
-| **Pipe** | Transforms or validates extracted data before the handler sees it |
+| **Error handler** | Claims an error on its way out and shapes the response for it |
 | **Middleware** | Runs before routing; good for logging, CORS, auth headers |
 | **Extractor** | Pulls typed data out of the request (path params, query, body, etc.) |
 | **Lifecycle hooks** | `on_module_init`, `on_application_bootstrap`, `on_application_shutdown`, etc. |
@@ -49,10 +49,10 @@ The same module/controller/DI model extends to other protocols:
 
 - [WebSocket gateways](/docs/websocket/gateways) — message handlers, rooms, broadcasting
 - [RPC microservices](/docs/microservices) — pattern-based messaging over TCP, UDP, NATS, Redis, RabbitMQ, MQTT, or Kafka
-- gRPC — contract-first services via `toni-grpc`
+- [gRPC](/docs/grpc) — contract-first services via `toni-grpc`
 - [Server-Sent Events](/docs/techniques/sse) and [GraphQL](/docs/graphql)
 
-Guards, interceptors, and pipes run on HTTP, WebSocket, and RPC handlers alike.
+Guards, interceptors, and error handlers run on HTTP, WebSocket, RPC, and gRPC handlers alike.
 
 ## Ready to build?
 

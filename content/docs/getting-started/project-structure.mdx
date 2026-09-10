@@ -100,7 +100,7 @@ indirection. `forRoot()` carries over as `for_root`: integration crates return a
 
 ## Shared/common code
 
-Infrastructure that spans features — guards, interceptors, pipes, common types — belongs in a shared location (`common/` or `shared/`). Enhancers are plain structs implementing the relevant trait; the traits are generic over the transport context (`HttpContext`, `RpcContext`, `WsContext`).
+Infrastructure that spans features — guards, interceptors, common types — belongs in a shared location (`common/` or `shared/`). Enhancers are plain structs implementing the relevant trait; the traits are generic over the transport context (`HttpContext`, `RpcContext`, `WsContext`).
 
 ```rust title="common/logging_interceptor.rs"
 use toni::HttpResponse;
@@ -137,4 +137,4 @@ app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await.unwrap();
 ```
 
-Global registration is per-transport: `use_global_http_*`, `use_global_rpc_*`, and `use_global_ws_*` variants exist for guards, interceptors, and pipes, plus transport-agnostic `use_global_middleware`.
+Global registration is per transport: `use_global_http_*`, `use_global_rpc_*`, `use_global_ws_*`, and `use_global_grpc_*`, each covering guards, interceptors, and error handlers. `use_global_middleware` carries no transport in its name because middleware is HTTP-only — it runs before routing, on every request the adapter receives.

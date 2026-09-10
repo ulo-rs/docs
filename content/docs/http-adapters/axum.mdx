@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
 `use_http_adapter` registers all routes from the module tree onto the adapter. `start()` binds the socket and serves until shutdown; bind failures (port in use) surface as the returned error.
 
-Toni's `{param}` path syntax matches Axum's, so routes mount unchanged. Unmatched paths and method mismatches hit a fallback that returns Toni's standard 404/405 envelope — the global middleware chain runs on those requests too.
+Toni's `{param}` path syntax matches Axum's, so routes mount unchanged. An unmatched path hits a fallback that returns Toni's standard 404 envelope. A method mismatch is answered by Axum's own router instead — an empty body with an `Allow` header, not the Toni envelope that `toni-actix`, `toni-salvo`, and `toni-rocket` build for a 405. The global middleware chain runs on both.
 
 ## Global enhancers
 
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Guards, interceptors, pipes, and error handlers are registered per transport (`use_global_http_*`, `use_global_rpc_*`, `use_global_ws_*`); `use_global_middleware` is HTTP-wide. For CORS, see [CORS](/docs/techniques/cors).
+Guards, interceptors, and error handlers are registered per transport (`use_global_http_*`, `use_global_rpc_*`, `use_global_ws_*`, `use_global_grpc_*`); `use_global_middleware` is HTTP-wide. For CORS, see [CORS](/docs/techniques/cors).
 
 ## Streaming bodies
 

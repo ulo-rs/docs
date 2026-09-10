@@ -67,7 +67,9 @@ Behavior worth knowing:
 
 WebSockets do not use CORS. There is no preflight — the browser upgrades the connection directly and sends an `Origin` header in the handshake. The server decides whether to accept or reject based on that header. `Access-Control-*` response headers are not checked by the browser for WebSocket connections.
 
-The right place to validate the `Origin` header in Toni is a **guard** on the gateway. Gateway-level guards run during the handshake, before `on_connect` fires — a rejected connection never completes.
+The right place to validate the `Origin` header in Toni is a **guard** on the gateway. Gateway-level guards run after the handshake and before `on_connect` fires. There is no HTTP status left to refuse with by then, so a refusal is delivered as frames: the client receives the canonical `{status, kind, message}` envelope, then a close frame.
+
+A guard's `false` closes with 1008 (policy violation), the code RFC 6455 reserves for a rule the caller broke — it has none for authentication. An `on_connect` that returns `Err` picks its code from the error's kind: 1013 for `TooManyRequests`, 1008 for the other client-fault kinds, 1011 for anything else. `WsError::Refused { code, reason }` names a code directly and sends the close alone, with no envelope in front of it — that is how a protocol with a refusal code of its own, such as graphql-ws's 4406, is answered.
 
 A guard is an `#[injectable]` struct implementing `Guard<WsContext>`. The handshake headers live on the client as a plain `HashMap<String, String>` (header names lowercase):
 
@@ -75,7 +77,7 @@ A guard is an `#[injectable]` struct implementing `Guard<WsContext>`. The handsh
 use toni::async_trait;
 use toni::context::WsContext;
 use toni::traits_helpers::Guard;
-use toni_macros::injectable;
+use toni::injectable;
 
 #[injectable]
 pub struct OriginGuard;
@@ -99,7 +101,7 @@ Apply it with `#[use_guards]` on the gateway's `#[subscriptions]` impl, and regi
 
 ```rust
 use toni::websocket::{WsClient, WsHandlerOutput, WsHandlerResult, WsMessage};
-use toni_macros::{module, subscriptions, websocket_gateway};
+use toni::{module, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway;
@@ -128,7 +130,7 @@ use toni::async_trait;
 use toni::context::WsContext;
 use toni::traits_helpers::Guard;
 use toni_config::ConfigService;
-use toni_macros::injectable;
+use toni::injectable;
 
 #[injectable]
 pub struct OriginGuard {

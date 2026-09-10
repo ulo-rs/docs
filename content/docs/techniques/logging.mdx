@@ -49,4 +49,4 @@ toni = { version = "0.2", default-features = false }
 
 ## Where logs go
 
-The default writes human-readable lines to stderr, so `docker logs` and `journalctl` capture them with no configuration. RPC and gRPC calls run inside an `rpc.request` span whose fields (`transport`, `pattern`, `id`, `peer`) every log line emitted from handlers and enhancers inherits — see [gRPC operations](/docs/grpc/operations) for the span shape.
+The default writes human-readable lines to stderr, so `docker logs` and `journalctl` capture them with no configuration. TCP, UDP, and gRPC calls run inside an `rpc.request` span whose fields (`transport`, `pattern`, `id`, `peer`) every log line emitted from handlers and enhancers inherits — see [gRPC operations](/docs/grpc/operations) for the span shape. The broker transports (NATS, Redis, RabbitMQ, MQTT, Kafka) open no span, so lines from their handlers carry no call context unless you open one yourself.

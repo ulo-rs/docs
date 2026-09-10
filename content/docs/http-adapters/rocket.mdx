@@ -33,7 +33,9 @@ Routes are not translated into Rocket's `<param>` syntax. The adapter mounts one
 
 ## WebSocket support
 
-Same-port gateways (`#[websocket_gateway("/path")]`) upgrade through `rocket_ws` on the HTTP listener; the routes are mounted as `GET`, matching RFC 6455. Sub-protocol negotiation is handled by `rocket_ws`.
+Same-port gateways (`#[websocket_gateway("/path")]`) upgrade through `rocket_ws` on the HTTP listener; the routes are mounted as `GET`, matching RFC 6455.
+
+No sub-protocol is negotiated: the handshake reply carries `Sec-WebSocket-Accept` and nothing else. `toni-axum`, `toni-salvo`, and `toni-poem` each echo back the first protocol the client offered. A client that requires the server to select one — a `graphql-transport-ws` client does — refuses the connection on this adapter.
 
 The adapter does **not** implement `WebSocketAdapter`, so separate-port gateways (`#[websocket_gateway("/path", port = N)]`) fail registration. Pair `toni-rocket` with a dedicated separate-port adapter ([`toni-tungstenite`](/docs/websocket/separate-port)) when you need one.
 
@@ -48,5 +50,6 @@ The adapter forwards Toni's shutdown signal to Rocket's `Shutdown::notify()`; th
 
 ## Quirks
 
+- **A pre-bound listener is refused.** Rocket binds inside `launch()` from its own figment configuration, with no seam for a socket that is already listening. Passing a `std::net::TcpListener` as the bind target fails at `app.bind()` with `StartupError::Adapter { transport: "http", .. }` naming the limitation. Socket activation and listener hand-off across restarts need one of the other four adapters — see [Bind Targets](/docs/techniques/bind-targets).
 - **Hostname must be an IP literal.** The hostname is parsed as an `IpAddr` for Rocket's config; a DNS name like `"localhost"` falls back to `127.0.0.1`. Pass `"127.0.0.1"` or `"0.0.0.0"` explicitly.
 - **Port 0 works via a liftoff fairing.** Rocket fuses bind and serve into `launch()` with no public pre-serve hook, so the adapter captures the OS-assigned address in an `on_liftoff` fairing. `app.bind()` still returns the real address in `BoundAdapters` — dynamic ports behave like every other adapter.

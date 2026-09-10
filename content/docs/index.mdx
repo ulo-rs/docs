@@ -3,7 +3,7 @@ title: Documentation
 description: A modular Rust framework for server-side applications — modules, dependency injection, and one enhancer chain across every transport.
 ---
 
-Toni organizes a Rust application into **modules**, each holding **controllers** that answer requests and **services** that carry the logic. Dependencies arrive through a container. Every request passes through the same chain of middleware, guards, interceptors, and pipes, whether it arrived over HTTP, a WebSocket, an RPC transport, or gRPC.
+Toni organizes a Rust application into **modules**, each holding **controllers** that answer requests and **services** that carry the logic. Dependencies arrive through a container. Every request passes through the same chain of middleware, guards, and interceptors, whether it arrived over HTTP, a WebSocket, an RPC transport, or gRPC.
 
 Toni is not an HTTP server. Sockets, TLS, and parsing belong to the adapter you pick — five ship with the framework, and the seam is a trait you can implement yourself.
 

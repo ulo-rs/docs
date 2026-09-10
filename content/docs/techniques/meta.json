@@ -6,6 +6,7 @@
     "health",
     "logging",
     "bind-targets",
+    "graceful-shutdown",
     "cors"
   ]
 }

@@ -30,7 +30,7 @@ pub trait HttpAdapter: Send + Sync + 'static {
 
 Everything you need is exported from the `toni` crate root: `HttpAdapter`, `HttpMethod`, `RequestHandler`, `AdapterContext`, `BindTarget`, `HttpLifecycleHandle`, `HttpRequest`, `HttpResponse`, `WsConnectionCallbacks`, plus `http_helpers::{PathParams, RequestBody}`.
 
-**`register_route`** is called at bootstrap for every route the framework discovers. Store the `(method, path, handler)` triple; build the native router later. Each `Arc<dyn RequestHandler>` wraps one route's full pipeline — route-scoped middleware, guards, interceptors, pipes, and the controller — behind a single call:
+**`register_route`** is called at bootstrap for every route the framework discovers. Store the `(method, path, handler)` triple; build the native router later. Each `Arc<dyn RequestHandler>` wraps one route's full pipeline — route-scoped middleware, guards, interceptors, and the controller — behind a single call:
 
 ```rust
 pub trait RequestHandler: Send + Sync + 'static {

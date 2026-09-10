@@ -1,0 +1,148 @@
+---
+title: Graceful Shutdown
+description: Wiring SIGTERM and SIGINT to a ShutdownHandle, and what the application drains before the process ends.
+---
+
+An orchestrator stops a container by sending SIGTERM and waiting for the process to leave. The default disposition for that signal ends the process on the spot: responses are cut mid-body, WebSocket peers see a dropped connection instead of a close frame, and no shutdown hook runs — so pools are never returned and buffers are never flushed.
+
+Toni installs no signal handler. A process's signal disposition is global, so a library that claims one takes it from everything else in the binary. What Toni provides instead is a handle: something to call when *you* decide the application should stop.
+
+## The handle
+
+`shutdown_handle()` returns a `ShutdownHandle`. It is cloneable, `Send`, and valid as soon as the application exists — you can take it before `bind()`.
+
+```rust
+impl ShutdownHandle {
+    pub fn shutdown(&self);
+    pub fn is_shutdown(&self) -> bool;
+    pub async fn wait_for_shutdown(&self);
+    pub async fn completed(&self);
+}
+```
+
+- **`shutdown()`** asks the application to stop. Only the first call has an effect, so any number of tasks can race to call it — a signal handler, a `/admin/quit` route, a supervisor watching a health probe.
+- **`is_shutdown()`** reads the flag. A background loop checks it between iterations to stop starting new work.
+- **`wait_for_shutdown()`** resolves once `shutdown()` has been called. `tokio::select!` it against long-lived work to cancel that work instead of polling.
+- **`completed()`** resolves once `run()` has returned — every adapter closed, every hook finished. A task that must outlive the drain waits on this.
+
+Take the handle before `run()`: `run` consumes the application.
+
+## Wiring the signals
+
+Catch the signals in a spawned task and call `shutdown()`. The application future stays in `main`:
+
+```rust
+use toni::*;
+use toni_axum::AxumAdapter;
+
+async fn shutdown_signal() -> &'static str {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut sigterm = signal(SignalKind::terminate()).expect("failed to listen for SIGTERM");
+        let mut sigint = signal(SignalKind::interrupt()).expect("failed to listen for SIGINT");
+
+        tokio::select! {
+            _ = sigterm.recv() => "SIGTERM",
+            _ = sigint.recv() => "SIGINT",
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await.expect("failed to listen for Ctrl+C");
+        "SIGINT"
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
+    app.bind().await?;
+
+    let shutdown = app.shutdown_handle();
+    tokio::spawn(async move {
+        let signal = shutdown_signal().await;
+        tracing::info!(%signal, "shutting down");
+        shutdown.shutdown();
+    });
+
+    app.run().await;
+    Ok(())
+}
+```
+
+`bind()` then `run()` rather than `start()`, because the handle has to be taken between them. [`examples/graceful_shutdown.rs`](https://github.com/ifeanyi-ugwu/toni-rs/blob/master/examples/graceful_shutdown.rs) is this pattern with a WebSocket gateway attached.
+
+SIGINT is worth catching alongside SIGTERM: it is what Ctrl-C sends, so the same drain you rely on in production is the one you exercise locally.
+
+## What the drain does
+
+`shutdown()` unblocks `run()`, which stops the application in a fixed order:
+
+1. **Connected WebSocket clients are sent a close frame** — when `BroadcastModule` (or a module that supplies `BroadcastService`) is imported, so the framework has the client map to walk.
+2. **Adapters are closed**, in reverse registration order. Each stops accepting and drains what it already has: Axum's `with_graceful_shutdown`, Actix's `stop(true)`, Salvo's `stop_graceful`, Poem's `run_with_graceful_shutdown`, Rocket's `Shutdown::notify()`, and the equivalent on every RPC and gRPC adapter.
+3. **Shutdown hooks run**: `on_module_destroy`, then `before_application_shutdown`, then `on_application_shutdown` — see [Lifecycle Hooks](/docs/core-concepts/lifecycle-hooks) for what belongs in each.
+
+Adapters before hooks is what makes the drain worth having. A hook that closes a connection pool runs after the last in-flight request that needed the pool has answered.
+
+<Callout type="info">
+`before_application_shutdown` and `on_application_shutdown` take a `signal: Option<String>` parameter, and it is always `None` — `shutdown()` carries no argument. A hook that needs to know which signal arrived reads it from state the signal task wrote.
+</Callout>
+
+## Drain deadlines
+
+`toni-tcp`, `toni-udp`, and `toni-grpc` bound the drain with `with_drain_timeout` — 10 seconds by default, `None` to wait without limit. Work still running when the deadline passes is aborted, and its caller sees the transport's error rather than a reply:
+
+```rust
+use std::net::SocketAddr;
+use std::time::Duration;
+use toni_grpc::GrpcAdapter;
+
+let addr: SocketAddr = "0.0.0.0:50051".parse()?;
+app.use_grpc_adapter(GrpcAdapter::new(addr).with_drain_timeout(Duration::from_secs(30)))
+    .unwrap();
+```
+
+The HTTP adapters carry no such knob: each hands the drain to its own server, and how long that server waits is the server's own configuration. Bound it from outside the process instead — the orchestrator's [termination grace period](/docs/deployment/production) is the deadline that always applies, and a drain longer than it is a drain that gets SIGKILLed halfway.
+
+## A transport that dies on its own
+
+A serve loop that returns without being asked to — its socket failed, its broker connection is gone — shuts down the whole application. A process that keeps answering three transports after the fourth died reports healthy while serving less than it advertises; stopping is the honest answer, and the supervisor restarts it. A restart drops no connections when something outside the process owns the socket — see [Bind Targets](/docs/techniques/bind-targets).
+
+Nothing calls `process::exit`. Every path out of `run()` is a return.
+
+## Stopping without draining
+
+`close(&mut self)` runs the hooks and closes the adapters immediately, with no drain — in-flight requests are cut. It takes `&mut self`, so it applies to an application you still hold, which is the shape a test harness has after `bind()` without `run()`. Prefer `shutdown()` anywhere a client is on the other end.
+
+## Spawning the application
+
+The application is `!Send` — its container is an `Rc<RefCell<_>>`. `main` can still `await` it on any runtime, which is what the example above does. Spawning it needs `tokio::task::LocalSet` and `spawn_local`:
+
+```rust
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut app = ToniFactory::new().create_with(AppModule).await?;
+            app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
+            app.bind().await?;
+
+            let shutdown = app.shutdown_handle();
+            tokio::task::spawn_local(async move {
+                shutdown_signal().await;
+                shutdown.shutdown();
+            });
+
+            app.run().await;
+            Ok(())
+        })
+        .await
+}
+```
+
+The signal task itself is `Send`, so `tokio::spawn` works for it in either shape — only the application needs the `LocalSet`.

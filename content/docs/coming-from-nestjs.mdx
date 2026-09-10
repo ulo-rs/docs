@@ -3,7 +3,7 @@ title: Coming from NestJS
 description: The decorator-to-macro map, a small NestJS application ported line by line, and the places where Toni diverges.
 ---
 
-Toni takes its architecture from NestJS: modules own controllers and providers, dependencies arrive through a container, and every request passes through guards, interceptors, and pipes on its way to a handler. If you know that model, you already know how a Toni application is laid out.
+Toni takes its architecture from NestJS: modules own controllers and providers, dependencies arrive through a container, and every request passes through guards and interceptors on its way to a handler. If you know that model, you already know how a Toni application is laid out.
 
 What changes is the language. TypeScript decorators become Rust attribute macros, classes become structs, and a handful of NestJS constructs turn out to be unnecessary once types survive to runtime. This page covers all three: the map, a full port, and the divergences.
 
@@ -19,13 +19,16 @@ What changes is the language. TypeScript decorators become Rust attribute macros
 | `@Injectable()` | `#[injectable]` on the struct |
 | `@Controller('users')` | `#[controller("/users")]` on the struct; handlers in a `#[routes]` impl |
 | `@Get()` `@Post()` `@Put()` `@Delete()` | `#[get]` `#[post]` `#[put]` `#[delete]` |
+| `@Patch()` `@Head()` `@Options()` | no verb macro |
 | `@Sse()` | `#[sse("/path")]` |
 | `@WebSocketGateway()` | `#[websocket_gateway("/path")]`; handlers in a `#[subscriptions]` impl |
 | `@SubscribeMessage('event')` | `#[subscribe_message("event")]` |
-| `@MessagePattern()` | `#[message_pattern]` in a `#[patterns]` impl on an `#[rpc_controller]` |
+| `@MessagePattern()` | `#[message_pattern]` in a `#[patterns]` impl on a `#[controller]` struct |
 | `@EventPattern()` | `#[event_pattern]` |
-| `@GrpcMethod()` | a method on the `#[grpc_methods]` trait impl |
+| `@GrpcMethod()` | `#[grpc_method]` in a `#[grpc_methods(proto::Trait)]` inherent impl on a `#[controller]` struct |
 | `@SetMetadata()` | `#[set_metadata]` |
+
+The verb macros stop at `#[get]`, `#[post]`, `#[put]`, `#[delete]`, and `#[sse]`. Answer a `PATCH`, `HEAD`, or `OPTIONS` request from global middleware instead — it runs before routing and can return a response without reaching a handler.
 
 ### The enhancer chain
 
@@ -33,10 +36,9 @@ What changes is the language. TypeScript decorators become Rust attribute macros
 |--------|------|
 | `CanActivate` | `Guard<C>` |
 | `NestInterceptor` | `Interceptor<C, R>` |
-| `PipeTransform` | `Pipe<C, R>` |
 | `ExceptionFilter` + `@Catch(T)` | `ErrorHandler<C, R>`, usually written as `#[catch(T)]` |
 | `NestMiddleware` | `Middleware` |
-| `@UseGuards()` `@UseInterceptors()` `@UsePipes()` | `#[use_guards]` `#[use_interceptors]` `#[use_pipes]` |
+| `@UseGuards()` `@UseInterceptors()` `@UseFilters()` | `#[use_guards]` `#[use_interceptors]` `#[use_error_handlers]` |
 | `useGlobalGuards()` | `use_global_http_guards()`, and one per transport |
 | `HttpException` | `HttpError` |
 | `RpcException` | `RpcError` |
@@ -233,9 +235,9 @@ These are the places the map above does not reach — where a NestJS habit produ
 
 `can_activate` returns `bool`. There is no `UnauthorizedException` to raise from inside a guard, and `false` produces a 403. To answer with anything else, register a `#[catch(GuardRejection)]` error handler. In exchange, `can_activate` is async — JWT verification and database lookups run inline.
 
-### Pipes are the fallback, not the validation path
+### There is no `ValidationPipe`
 
-NestJS leans on a global `ValidationPipe` because TypeScript types are erased at runtime. In Toni, `Path<i32>` parses and `Validated<Json<T>>` validates, both declared in the handler signature and enforced by the compiler. `Pipe` exists for what extractors cannot express: a check needing a dependency, or one spanning several extracted values.
+NestJS leans on a global `ValidationPipe` because TypeScript types are erased at runtime. In Toni, `Path<i32>` parses and `Validated<Json<T>>` validates, both declared in the handler signature and enforced by the compiler. `Validated<E>` validates whatever extractor `E` wraps, on any transport — `Validated<Payload<T>>` checks an RPC message or a WebSocket frame the same way. A check that needs a dependency, or one spanning several extracted values, belongs in a guard or in a custom `FromContext` extractor.
 
 ### Error handlers are the override, not the default
 
@@ -243,7 +245,7 @@ A `#[derive(toni::Error)]` type carries an `ErrorKind` and renders itself — re
 
 ### Globals are registered per transport
 
-There is no `useGlobalGuards`. There is `use_global_http_guards`, `use_global_ws_guards`, `use_global_rpc_guards`, and the same split for interceptors, pipes, and error handlers. gRPC has no globals at all, and no pipes.
+`useGlobalGuards` has no single counterpart. Each transport registers its own: `use_global_http_guards`, `use_global_ws_guards`, `use_global_rpc_guards`, `use_global_grpc_guards` — and the same four-way split for interceptors and error handlers. `use_global_middleware` is the one call without a transport in its name, and it applies to HTTP only.
 
 ### The global middleware chain runs before routing
 
@@ -255,15 +257,15 @@ A request-scoped provider is built once per *execution*: one HTTP request, one W
 
 ### Nothing handles signals for you
 
-NestJS starts running shutdown hooks on SIGTERM once `enableShutdownHooks()` is called. Toni installs no signal handlers. Wire SIGTERM and SIGINT to a `ShutdownHandle` yourself, or the hooks never run.
+NestJS starts running shutdown hooks on SIGTERM once `enableShutdownHooks()` is called. Toni installs no signal handlers. Wire SIGTERM and SIGINT to a `ShutdownHandle` yourself, or the hooks never run — see [Graceful Shutdown](/docs/techniques/graceful-shutdown).
 
 ### Startup has three phases, and each can fail
 
-`create` resolves the dependency graph and runs init hooks. `bind` acquires sockets. `run` serves. All four constructors return `Result`, and `bind` is refuse-or-none: every declared transport registers before any socket is acquired, so a misconfiguration reports before a port conflict does. Nothing calls `process::exit`.
+`create` resolves the dependency graph and runs init hooks. `bind` acquires sockets. `run` serves. All four constructors return `Result`, and `bind` is refuse-or-none: a transport that fails takes the whole application down and closes whatever was already acquired. Registration precedes acquisition for HTTP, WebSocket, and gRPC, so a misconfiguration on those reports before a port conflict does; `toni-tcp` and `toni-udp` take their socket while registering, and can report a conflict first. Nothing calls `process::exit`.
 
 ### The application is `!Send`
 
-The container is `Rc<RefCell<_>>`, so the app cannot cross threads. Run it under a `LocalSet` on a `current_thread` runtime. Handlers and providers are unaffected; this constrains only how you start the process.
+The container is `Rc<RefCell<_>>`, so the app cannot cross threads. `main` can still `await` it on any runtime — that is what the quick start does, and `block_on` accepts a `!Send` future. A `tokio::task::LocalSet` and `spawn_local` are needed only when the application is *spawned* rather than awaited: a gRPC server, or several applications sharing one thread. Handlers and providers are unaffected; this constrains only how you start the process.
 
 ## Next
 

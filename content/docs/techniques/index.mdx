@@ -1,6 +1,6 @@
 ---
 title: Techniques
-description: Streaming responses, health endpoints, logging, socket hand-off, and CORS.
+description: Streaming responses, health endpoints, logging, socket hand-off, shutdown, and CORS.
 ---
 
 Self-contained pages for things an application needs once it leaves a laptop. Nothing here depends on anything else here — read whichever one you have arrived for.
@@ -10,5 +10,6 @@ Self-contained pages for things an application needs once it leaves a laptop. No
   <Card title="Health Checks" href="/docs/techniques/health" description="Liveness and readiness endpoints, with indicators for HTTP, memory, and disk." />
   <Card title="Logging" href="/docs/techniques/logging" description="The default subscriber, RUST_LOG, and replacing both." />
   <Card title="Bind Targets" href="/docs/techniques/bind-targets" description="Binding an address, or adopting a socket another process already bound." />
+  <Card title="Graceful Shutdown" href="/docs/techniques/graceful-shutdown" description="Wiring SIGTERM yourself, and what the application drains before it ends." />
   <Card title="CORS" href="/docs/techniques/cors" description="Cross-origin rules for HTTP routes and WebSocket handshakes." />
 </Cards>
