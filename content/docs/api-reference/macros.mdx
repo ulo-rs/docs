@@ -418,10 +418,9 @@ Used inside a module's `providers: [...]` list. Token position accepts a string 
 ```rust
 provider_value!("APP_NAME", "ToniApp".to_string())
 provider_value!(Duration, Duration::from_secs(60))              // type-based token
-provider_value!("CLIENT", RpcClient::new(transport), lifecycle) // participates in lifecycle hooks
 ```
 
-Registers a constant value. Optional trailing arguments, comma-separated: a type hint naming the produced type, and `lifecycle` — the value's own lifecycle hooks run, which is how a client connects at bootstrap and closes at shutdown.
+Registers a constant value. An optional trailing argument gives a type hint naming the produced type. A value registered this way is constructed once and never receives lifecycle hooks — a client that must reach its peer connects lazily on first use instead.
 
 ### `provider_factory!`
 
@@ -431,7 +430,7 @@ provider_factory!("APP_INFO", |config: ConfigService| build_info(config))   // t
 provider_factory!("STATUS", async |logger: LoggerService| check(logger).await)
 ```
 
-Closure parameters are resolved from the container by type. Optional trailing arguments (comma-separated, any order): `scope = "request"` / `"transient"`, `lifecycle` (the produced value participates in lifecycle hooks — e.g. an `RpcClient` connecting at bootstrap), and a type hint naming the produced type.
+Closure parameters are resolved from the container by type. Optional trailing arguments, comma-separated and in any order: `scope = "request"` / `"transient"`, and a type hint naming the produced type. A scoped factory refuses to build outside an execution; it runs its closure on every resolution rather than caching one value per execution, which is what `#[injectable(scope = "request")]` does.
 
 ### `provider_alias!`
 
