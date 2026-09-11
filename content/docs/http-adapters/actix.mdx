@@ -38,7 +38,7 @@ The adapter forwards Ulo's shutdown signal to Actix's server handle with gracefu
 ## Limitations
 
 - **No WebSocket.** The adapter implements neither same-port upgrades nor the `WebSocketAdapter` trait. A `#[websocket_gateway]` cannot be served through `ulo-http-actix` on the HTTP port; pair it with a separate-port WebSocket adapter ([`ulo-ws-tungstenite`](/docs/websocket/separate-port)) for gateways declared with `port = N`.
-- **Buffered request bodies.** The full body is read into memory before the handler runs. The `BodyStream` extractor still works, but sees the payload as a single chunk.
+- **Buffered request bodies, capped at 256 KiB.** The full body is read into memory before the handler runs, and a request over 262 144 bytes is answered `413 Payload Too Large` before any handler, guard or middleware sees it. The ceiling is actix-web's `PayloadConfig` default, which this adapter never raises, so there is no ulo knob for it — a handler that accepts uploads on axum starts refusing them here at a threshold 128× smaller than rocket's. The `BodyStream` extractor still works, but sees the payload as a single chunk.
 - **Buffered response bodies.** The response body is collected in full before it is sent. Streaming responses — [SSE](/docs/techniques/sse), large downloads built with `Body::stream` — do not work on this adapter; an unbounded stream never completes. Use `ulo-http-axum`, `ulo-http-salvo`, or `ulo-http-poem` for streaming workloads.
 
 ## When to choose Actix
