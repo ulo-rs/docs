@@ -5,8 +5,11 @@ description: Add Ulo to a new or existing Rust project.
 
 ## Prerequisites
 
-- Rust 1.85 or later (the crates use the 2024 edition)
+- Rust 1.88 or later — `ulo` and the adapters declare it as their minimum
 - Cargo
+
+Two crates ask for more, and only if you use them: `ulo-http-salvo` needs 1.92 and
+`ulo-graphql-async-graphql` needs 1.89.
 
 ## Option A — Start from a template with the CLI
 
