@@ -14,7 +14,7 @@ Five adapter crates ship with the framework:
 | | `ulo-http-axum` | `ulo-http-actix` | `ulo-http-salvo` | `ulo-http-poem` | `ulo-http-rocket` |
 |---|---|---|---|---|---|
 | **Underlying framework** | Axum 0.8 | Actix-web 4 | Salvo 0.92 | Poem 3.1 | Rocket 0.5 |
-| **Request bodies** | Streamed | Buffered | Streamed | Streamed | Buffered (32 MiB cap) |
+| **Request bodies** | Streamed | Buffered (256 KiB cap) | Streamed | Streamed | Buffered (32 MiB cap) |
 | **Response bodies** | Streamed | Buffered | Streamed | Streamed | Streamed |
 | **Same-port WebSocket** | Yes | No | Yes | Yes | Yes (`rocket_ws`) |
 | **Separate-port WebSocket** | Yes | No — pair `ulo-ws-tungstenite` | Yes | Yes | No — pair `ulo-ws-tungstenite` |
