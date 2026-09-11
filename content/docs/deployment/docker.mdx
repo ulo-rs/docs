@@ -1,6 +1,6 @@
 ---
 title: Docker
-description: Containerizing a Toni application with Docker and docker-compose.
+description: Containerizing a Ulo application with Docker and docker-compose.
 ---
 
 ## Dockerfile
@@ -8,7 +8,7 @@ description: Containerizing a Toni application with Docker and docker-compose.
 Multi-stage builds keep the final image small — the builder stage compiles everything, the runtime stage contains only the binary:
 
 ```dockerfile
-# Builder stage — toni uses edition 2024, which needs Rust 1.85+
+# Builder stage — ulo uses edition 2024, which needs Rust 1.85+
 FROM rust:1.85-alpine AS builder
 
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev
@@ -45,11 +45,11 @@ CMD ["./my_app"]
 Build and run:
 
 ```bash
-docker build -t my-toni-app .
+docker build -t my-ulo-app .
 docker run -p 8080:8080 \
   -e DATABASE_URL=postgresql://host.docker.internal:5432/myapp \
   -e JWT_SECRET=your-secret-here \
-  my-toni-app
+  my-ulo-app
 ```
 
 ## docker-compose
@@ -99,7 +99,7 @@ docker compose logs -f api
 Logs appear without any setup: the framework installs a default `tracing` subscriber writing to stderr, which Docker captures. `RUST_LOG` controls the level (`info` when unset). See [Logging](/docs/techniques/logging).
 
 <Callout type="warn" title="A container with no signal wiring is killed, not drained">
-`docker stop` sends SIGTERM and kills the container after a timeout. Toni installs no signal handlers, so wire SIGTERM to the application's shutdown handle yourself — see [Graceful shutdown](/docs/deployment/production#graceful-shutdown). Without it, in-flight requests are dropped and shutdown hooks never run.
+`docker stop` sends SIGTERM and kills the container after a timeout. Ulo installs no signal handlers, so wire SIGTERM to the application's shutdown handle yourself — see [Graceful shutdown](/docs/deployment/production#graceful-shutdown). Without it, in-flight requests are dropped and shutdown hooks never run.
 </Callout>
 
 ## Health check endpoint
@@ -108,7 +108,7 @@ Add a health check route that returns 200 when the application is ready:
 
 ```rust
 use serde_json::json;
-use toni::*;
+use ulo::*;
 
 #[controller("/health")]
 pub struct HealthController;

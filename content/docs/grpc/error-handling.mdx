@@ -3,10 +3,10 @@ title: Error Handling
 description: Domain errors to gRPC codes, GrpcStatus, the error-handler chain, and panic recovery on gRPC calls.
 ---
 
-A handler answers with its own error type — the same `toni::Error` a handler on any other transport would return. Its `kind()` decides the code on the wire, so one error type serves HTTP, RPC, WebSocket and gRPC without a per-transport branch. Every error a handler returns and every recovered panic is offered to an error-handler chain that can reshape it before it reaches the caller.
+A handler answers with its own error type — the same `ulo::Error` a handler on any other transport would return. Its `kind()` decides the code on the wire, so one error type serves HTTP, RPC, WebSocket and gRPC without a per-transport branch. Every error a handler returns and every recovered panic is offered to an error-handler chain that can reshape it before it reaches the caller.
 
 ```rust
-#[derive(Debug, toni::Error)]
+#[derive(Debug, ulo::Error)]
 enum OrderError {
     #[error_kind(BadRequest)]
     InvalidQty { qty: u32 },
@@ -42,7 +42,7 @@ Returned from a handler, `InvalidQty` reaches the caller as `INVALID_ARGUMENT` a
 
 ## GrpcStatus and GrpcCode
 
-`toni::GrpcStatus` is the transport-neutral mirror of `tonic::Status`. It lets guards, interceptors, and error handlers name a gRPC error without depending on tonic; the adapter converts at the wire boundary.
+`ulo::GrpcStatus` is the transport-neutral mirror of `tonic::Status`. It lets guards, interceptors, and error handlers name a gRPC error without depending on tonic; the adapter converts at the wire boundary.
 
 Build one with `GrpcStatus::new(code, message)` or the shorthands `permission_denied`, `invalid_argument`, `internal`, `not_found`, and `unauthenticated`. Three more constructors exist for carrying a domain error along with the code:
 
@@ -56,7 +56,7 @@ A `GrpcStatus` is not a struct literal: alongside the public `code` and `message
 
 ### Naming a code no kind reaches
 
-`GrpcStatus` implements `toni::Error`, so a handler returns one directly when it needs a code the eleven kinds do not produce. Add `.caused_by(...)` to keep a domain type the chain can still match on:
+`GrpcStatus` implements `ulo::Error`, so a handler returns one directly when it needs a code the eleven kinds do not produce. Add `.caused_by(...)` to keep a domain type the chain can still match on:
 
 ```rust
 #[grpc_method]
@@ -79,14 +79,14 @@ An error handler implements `ErrorHandler<GrpcContext, GrpcStatus>`. Returning `
 The chain is handed the handler's own error, not the status it flattened into — the domain error rides out on the answer and is recovered on the way to the chain. `downcast_ref::<MyError>()` therefore matches here exactly as it does on the other three transports:
 
 ```rust
-use toni::{GrpcCode, GrpcContext, GrpcStatus};
-use toni::traits_helpers::{ChainError, ErrorHandler};
+use ulo::{GrpcCode, GrpcContext, GrpcStatus};
+use ulo::traits_helpers::{ChainError, ErrorHandler};
 
 #[injectable]
 pub struct QtyErrorHandler {}
 impl QtyErrorHandler {}
 
-#[toni::async_trait]
+#[ulo::async_trait]
 impl ErrorHandler<GrpcContext, GrpcStatus> for QtyErrorHandler {
     async fn handle_error(
         &self,
@@ -109,7 +109,7 @@ Applied with `#[use_error_handlers(QtyErrorHandler)]` at the impl or method leve
 For a handler that exists only to reshape one type, `#[catch(T)]` lowers a free async function into the same trait impl. Both parameters are shared references, and the return type is the bare `GrpcStatus`:
 
 ```rust
-use toni::{catch, GrpcCode, GrpcContext, GrpcStatus};
+use ulo::{catch, GrpcCode, GrpcContext, GrpcStatus};
 
 #[catch(OrderError)]
 async fn reshape_order_error(err: &OrderError, _ctx: &GrpcContext) -> GrpcStatus {
@@ -145,12 +145,12 @@ The one panic the chain cannot be offered is a panic inside the chain itself. Th
 
 A parameter that cannot be extracted fails the call with `Internal` carrying the reason, and does not reach the error chain: asking for a message on a method whose caller streams, or for a `Payload<T>` whose `T` is not that method's request type, is a fault in the handler's declaration rather than in the call. The message names both the type asked for and the type the call carries.
 
-## Outside toni's dispatch
+## Outside ulo's dispatch
 
-A service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services) has no chain behind it. `toni_grpc::to_status(e)` is the hop from a domain error to a `tonic::Status` there:
+A service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services) has no chain behind it. `ulo_grpc::to_status(e)` is the hop from a domain error to a `tonic::Status` there:
 
 ```rust
-let order = self.orders.create(req).map_err(toni_grpc::to_status)?;
+let order = self.orders.create(req).map_err(ulo_grpc::to_status)?;
 ```
 
 For a bare `?`, give the error type the impl in the crate that owns it:
@@ -158,9 +158,9 @@ For a bare `?`, give the error type the impl in the crate that owns it:
 ```rust
 impl From<OrderError> for tonic::Status {
     fn from(e: OrderError) -> Self {
-        toni_grpc::to_status(e)
+        ulo_grpc::to_status(e)
     }
 }
 ```
 
-Either form keeps the domain error on the status's source slot. What such a service has no access to is the chain itself: nothing offers that error to a handler, because the call never entered toni's dispatch.
+Either form keeps the domain error on the status's source slot. What such a service has no access to is the chain itself: nothing offers that error to a handler, because the call never entered ulo's dispatch.

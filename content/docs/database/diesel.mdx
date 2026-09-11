@@ -1,9 +1,9 @@
 ---
 title: Diesel
-description: Integrating Diesel async with Toni's module system for type-safe SQL.
+description: Integrating Diesel async with Ulo's module system for type-safe SQL.
 ---
 
-`toni-diesel` provides a `DieselModule` with database-specific constructors that set up an async connection pool (via `deadpool`) at startup and make it available application-wide.
+`ulo-db-diesel` provides a `DieselModule` with database-specific constructors that set up an async connection pool (via `deadpool`) at startup and make it available application-wide.
 
 Queries are validated against your schema at compile time, and `diesel-async` runs them without blocking the executor.
 
@@ -13,8 +13,8 @@ Add the dependency with the appropriate feature for your database:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-diesel = { version = "0.1", features = ["postgres"] }
+ulo = "0.2"
+ulo-db-diesel = { version = "0.1", features = ["postgres"] }
 diesel = { version = "2", features = ["postgres_backend"], default-features = false }
 diesel-async = { version = "0.8", features = ["postgres", "deadpool"] }
 ```
@@ -26,7 +26,7 @@ Available features: `postgres`, `mysql`.
 Use the database-specific constructor in your root module's `imports`:
 
 ```rust
-use toni_diesel::DieselModule;
+use ulo_db_diesel::DieselModule;
 
 // PostgreSQL
 #[module(
@@ -46,14 +46,14 @@ DieselModule::mysql("mysql://user:pass@localhost/mydb")
 
 Each constructor returns a **global** `CheckedModule` — a `DynamicModule` carrying a configurable startup check. It works anywhere a module does: as an import or as the root module.
 
-The pool itself is constructed lazily, without dialing. What verifies the database is the [startup check](#startup-check): it probes the server in `on_module_init`, so an unreachable host surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create` — naming the module, with any password in the connection URL redacted (`postgresql://user:***@localhost/mydb`) — rather than on the first query.
+The pool itself is constructed lazily, without dialing. What verifies the database is the [startup check](#startup-check): it probes the server in `on_module_init`, so an unreachable host surfaces as `Err(StartupError::HookFailed)` from `UloFactory::create` — naming the module, with any password in the connection URL redacted (`postgresql://user:***@localhost/mydb`) — rather than on the first query.
 
 ## Startup check
 
 By default the module confirms the database answers before the application starts: 3 attempts, 2 seconds apart. Tune the schedule with `with_startup_check`:
 
 ```rust
-use toni::StartupCheck;
+use ulo::StartupCheck;
 
 DieselModule::postgres(url)
     .with_startup_check(StartupCheck::default().attempts(5))
@@ -74,7 +74,7 @@ The injected type is a `deadpool::Pool` over the async connection type:
 - `diesel_async::pooled_connection::deadpool::Pool<AsyncMysqlConnection>` for MySQL
 
 ```rust
-use toni_diesel::PgPool; // re-exported from toni_diesel
+use ulo_db_diesel::PgPool; // re-exported from ulo_db_diesel
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 
@@ -152,12 +152,12 @@ pub struct AppModule;
 
 ## Health checks
 
-Enable the `health` feature to have each constructor also register a health indicator: `PgHealthIndicator` for PostgreSQL, `MySqlHealthIndicator` for MySQL. Both expose `ping_check(key)` for use with `toni-terminus`. The indicator shares the registered pool and resolves it lazily on each check; enabling `health` opens no second pool. See [Health checks](/docs/techniques/health).
+Enable the `health` feature to have each constructor also register a health indicator: `PgHealthIndicator` for PostgreSQL, `MySqlHealthIndicator` for MySQL. Both expose `ping_check(key)` for use with `ulo-health`. The indicator shares the registered pool and resolves it lazily on each check; enabling `health` opens no second pool. See [Health checks](/docs/techniques/health).
 
 ## API reference
 
 ```rust
-use toni_diesel::DieselModule;
+use ulo_db_diesel::DieselModule;
 
 DieselModule::postgres(url: impl Into<String>) -> CheckedModule
 DieselModule::mysql(url: impl Into<String>)    -> CheckedModule
@@ -174,7 +174,7 @@ Each returned `CheckedModule`:
 - is **global** (no need to import into feature modules)
 - carries the startup check — reconfigure with `.with_startup_check(StartupCheck)`, drop it with `.without_startup_check()`
 
-Re-exports available from `toni_diesel` (feature-gated):
+Re-exports available from `ulo_db_diesel` (feature-gated):
 - `PgPool` — `deadpool::Pool<AsyncPgConnection>` (feature: `postgres`)
 - `MySqlPool` — `deadpool::Pool<AsyncMysqlConnection>` (feature: `mysql`)
 - `AsyncPgConnection`, `AsyncMysqlConnection`

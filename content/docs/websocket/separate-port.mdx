@@ -10,8 +10,8 @@ Use this to isolate WebSocket traffic from HTTP (separate load balancing, firewa
 ## Declaring a separate-port gateway
 
 ```rust
-use toni::websocket::{WsClient, WsHandlerResult, WsMessage};
-use toni::{module, new, subscriptions, websocket_gateway};
+use ulo::websocket::{WsClient, WsHandlerResult, WsMessage};
+use ulo::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/ws", port = 4000)]
 pub struct PingGateway {}
@@ -44,23 +44,23 @@ The listener binds on the HTTP adapter's hostname (or `0.0.0.0` when no HTTP ada
 
 ## Registering a WebSocket adapter
 
-`toni-tungstenite` provides `TungsteniteAdapter`, a raw-TCP WebSocket server built on tokio-tungstenite — purpose-built for separate-port deployment:
+`ulo-ws-tungstenite` provides `TungsteniteAdapter`, a raw-TCP WebSocket server built on tokio-tungstenite — purpose-built for separate-port deployment:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-tungstenite = "0.1"
+ulo = "0.2"
+ulo-ws-tungstenite = "0.1"
 ```
 
 ```rust
-use toni::ToniFactory;
-use toni_tungstenite::TungsteniteAdapter;
+use ulo::UloFactory;
+use ulo_ws_tungstenite::TungsteniteAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(PingModule).await?;
+    let mut app = UloFactory::create(PingModule).await?;
 
-    app.use_http_adapter(toni_axum::AxumAdapter::new(), ("127.0.0.1", 3000))
+    app.use_http_adapter(ulo_http_axum::AxumAdapter::new(), ("127.0.0.1", 3000))
         .unwrap();
     app.use_websocket_adapter(TungsteniteAdapter::new()).unwrap();
 
@@ -77,8 +77,8 @@ Multiple gateways on different ports each get their own listener from the same a
 With `port = 0`, read the assigned address from the `BoundAdapters` returned by `app.bind()`. `BoundAdapters.websocket` holds one `SocketAddr` per separate-port listener:
 
 ```rust
-let mut app = ToniFactory::create(PingModule).await?;
-app.use_http_adapter(toni_axum::AxumAdapter::new(), ("127.0.0.1", 0)).unwrap();
+let mut app = UloFactory::create(PingModule).await?;
+app.use_http_adapter(ulo_http_axum::AxumAdapter::new(), ("127.0.0.1", 0)).unwrap();
 app.use_websocket_adapter(TungsteniteAdapter::new()).unwrap();
 
 let bound = app.bind().await?;
@@ -118,8 +118,8 @@ Everything else works as on the shared port: `#[subscribe_message]` routing, con
 `AxumAdapter` also implements `WebSocketAdapter` (as do the salvo and poem adapters). Register a second instance to get separate-port listeners with a full HTTP upgrade — path routing and handshake headers/query intact:
 
 ```rust
-app.use_http_adapter(toni_axum::AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
-app.use_websocket_adapter(toni_axum::AxumAdapter::new()).unwrap();
+app.use_http_adapter(ulo_http_axum::AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
+app.use_websocket_adapter(ulo_http_axum::AxumAdapter::new()).unwrap();
 ```
 
 Choose this over `TungsteniteAdapter` when separate-port clients need header-based guards or multiple gateway paths on one port.

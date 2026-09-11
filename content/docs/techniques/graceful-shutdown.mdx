@@ -5,7 +5,7 @@ description: Wiring SIGTERM and SIGINT to a ShutdownHandle, and what the applica
 
 An orchestrator stops a container by sending SIGTERM and waiting for the process to leave. The default disposition for that signal ends the process on the spot: responses are cut mid-body, WebSocket peers see a dropped connection instead of a close frame, and no shutdown hook runs — so pools are never returned and buffers are never flushed.
 
-Toni installs no signal handler. A process's signal disposition is global, so a library that claims one takes it from everything else in the binary. What Toni provides instead is a handle: something to call when *you* decide the application should stop.
+Ulo installs no signal handler. A process's signal disposition is global, so a library that claims one takes it from everything else in the binary. What Ulo provides instead is a handle: something to call when *you* decide the application should stop.
 
 ## The handle
 
@@ -32,8 +32,8 @@ Take the handle before `run()`: `run` consumes the application.
 Catch the signals in a spawned task and call `shutdown()`. The application future stays in `main`:
 
 ```rust
-use toni::*;
-use toni_axum::AxumAdapter;
+use ulo::*;
+use ulo_http_axum::AxumAdapter;
 
 async fn shutdown_signal() -> &'static str {
     #[cfg(unix)]
@@ -58,7 +58,7 @@ async fn shutdown_signal() -> &'static str {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
     app.bind().await?;
 
@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-`bind()` then `run()` rather than `start()`, because the handle has to be taken between them. [`examples/graceful_shutdown.rs`](https://github.com/ifeanyi-ugwu/toni-rs/blob/master/examples/graceful_shutdown.rs) is this pattern with a WebSocket gateway attached.
+`bind()` then `run()` rather than `start()`, because the handle has to be taken between them. [`examples/graceful_shutdown.rs`](https://github.com/ulo-rs/ulo/blob/master/examples/graceful_shutdown.rs) is this pattern with a WebSocket gateway attached.
 
 SIGINT is worth catching alongside SIGTERM: it is what Ctrl-C sends, so the same drain you rely on in production is the one you exercise locally.
 
@@ -94,12 +94,12 @@ Adapters before hooks is what makes the drain worth having. A hook that closes a
 
 ## Drain deadlines
 
-`toni-tcp`, `toni-udp`, and `toni-grpc` bound the drain with `with_drain_timeout` — 10 seconds by default, `None` to wait without limit. Work still running when the deadline passes is aborted, and its caller sees the transport's error rather than a reply:
+`ulo-rpc-tcp`, `ulo-rpc-udp`, and `ulo-grpc` bound the drain with `with_drain_timeout` — 10 seconds by default, `None` to wait without limit. Work still running when the deadline passes is aborted, and its caller sees the transport's error rather than a reply:
 
 ```rust
 use std::net::SocketAddr;
 use std::time::Duration;
-use toni_grpc::GrpcAdapter;
+use ulo_grpc::GrpcAdapter;
 
 let addr: SocketAddr = "0.0.0.0:50051".parse()?;
 app.use_grpc_adapter(GrpcAdapter::new(addr).with_drain_timeout(Duration::from_secs(30)))
@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let mut app = ToniFactory::new().create_with(AppModule).await?;
+            let mut app = UloFactory::new().create_with(AppModule).await?;
             app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
             app.bind().await?;
 

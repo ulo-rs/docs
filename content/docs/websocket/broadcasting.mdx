@@ -10,7 +10,7 @@ description: Send messages to multiple connected clients from anywhere in your a
 Import `BroadcastModule::new()` in any module whose gateways or services need `BroadcastService`. The module is global, so one import makes the service injectable everywhere:
 
 ```rust
-use toni::websocket::BroadcastModule;
+use ulo::websocket::BroadcastModule;
 
 #[module(
     imports: [BroadcastModule::new()],
@@ -24,9 +24,9 @@ Without the import, gateways still work — each message is handled request-resp
 ## Broadcasting from a gateway
 
 ```rust
-use toni::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
-use toni::WsHandlerResult;
-use toni::{module, new, subscriptions, websocket_gateway};
+use ulo::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
+use ulo::WsHandlerResult;
+use ulo::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway {
@@ -101,8 +101,8 @@ Room membership management (`join_room`, `leave_room`, and queries) is covered i
 `BroadcastService` is `Clone` and injects into any provider:
 
 ```rust
-use toni::websocket::{BroadcastService, WsMessage};
-use toni::{injectable, new};
+use ulo::websocket::{BroadcastService, WsMessage};
+use ulo::{injectable, new};
 
 #[injectable]
 pub struct NotificationService {
@@ -132,10 +132,10 @@ A gateway is a DI provider, so it can be injected into an HTTP controller. Both 
 
 ```rust
 use serde::Deserialize;
-use toni::extractors::Json;
-use toni::websocket::{BroadcastModule, BroadcastService, WsMessage};
-use toni::*;
-use toni::{module, new, subscriptions, websocket_gateway};
+use ulo::extractors::Json;
+use ulo::websocket::{BroadcastModule, BroadcastService, WsMessage};
+use ulo::*;
+use ulo::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/notifications")]
 pub struct NotificationGateway {
@@ -196,7 +196,7 @@ Fetch the service from the container before starting the app and hand it to a ta
 
 ```rust
 use tokio::time::{interval, Duration};
-use toni::websocket::{BroadcastService, WsMessage};
+use ulo::websocket::{BroadcastService, WsMessage};
 
 async fn heartbeat(broadcast: BroadcastService) {
     let mut ticker = interval(Duration::from_secs(30));
@@ -208,7 +208,7 @@ async fn heartbeat(broadcast: BroadcastService) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 
     let broadcast = app.get::<BroadcastService>().await?;

@@ -3,7 +3,7 @@ title: Unit Testing
 description: Testing individual services, guards, and interceptors in isolation.
 ---
 
-Unit tests in Toni are ordinary Rust unit tests — no harness, no test module. A service is a plain struct: instantiate it and call its methods.
+Unit tests in Ulo are ordinary Rust unit tests — no harness, no test module. A service is a plain struct: instantiate it and call its methods.
 
 ## Testing a service
 
@@ -50,7 +50,7 @@ mod tests {
 
 <FromNest>
 There is no `Test.createTestingModule()` step. A service is a struct: construct
-it, call the method, assert. Reach for `ToniFactory::create_application_context`
+it, call the method, assert. Reach for `UloFactory::create_application_context`
 only when a test needs the container itself — resolution through tokens, request
 scope, or lifecycle hooks.
 </FromNest>
@@ -85,10 +85,10 @@ mod tests {
 Guards implement `Guard<HttpContext>` (or another context type) with an async `can_activate`. Build a request with `HttpRequest::builder()`, wrap it in an `HttpContext`, and await the guard directly:
 
 ```rust
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::traits_helpers::Guard;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::traits_helpers::Guard;
+use ulo::injectable;
 
 #[injectable]
 pub struct AuthGuard;
@@ -108,7 +108,7 @@ impl Guard<HttpContext> for AuthGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use toni::{HttpRequest, RequestBody};
+    use ulo::{HttpRequest, RequestBody};
 
     fn context_with_token(token: &str) -> HttpContext {
         let req = HttpRequest::builder()
@@ -146,9 +146,9 @@ mod tests {
 A request-scoped provider only exists inside an execution, so tests resolve it against one. `ProviderContext::standalone()` builds a transportless execution:
 
 ```rust
-use toni::{ProviderContext, ToniFactory};
+use ulo::{ProviderContext, UloFactory};
 
-let app = ToniFactory::create(TestModule).await.unwrap();
+let app = UloFactory::create(TestModule).await.unwrap();
 let execution = ProviderContext::standalone();
 
 let service = app.resolve::<RequestScopedService>(&execution).await.unwrap();

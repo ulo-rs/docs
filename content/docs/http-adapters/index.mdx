@@ -1,9 +1,9 @@
 ---
 title: HTTP Adapters Overview
-description: Why Toni separates application logic from the HTTP runtime, and how to choose between the five official adapters.
+description: Why Ulo separates application logic from the HTTP runtime, and how to choose between the five official adapters.
 ---
 
-Toni doesn't handle HTTP itself. That concern belongs to the **adapter** — a thin integration layer that bridges Toni's routing and DI system to an actual HTTP server.
+Ulo doesn't handle HTTP itself. That concern belongs to the **adapter** — a thin integration layer that bridges Ulo's routing and DI system to an actual HTTP server.
 
 This separation means your application logic is completely decoupled from the HTTP runtime. Switching adapters is a one-line change in `main.rs`.
 
@@ -11,32 +11,32 @@ This separation means your application logic is completely decoupled from the HT
 
 Five adapter crates ship with the framework:
 
-| | `toni-axum` | `toni-actix` | `toni-salvo` | `toni-poem` | `toni-rocket` |
+| | `ulo-http-axum` | `ulo-http-actix` | `ulo-http-salvo` | `ulo-http-poem` | `ulo-http-rocket` |
 |---|---|---|---|---|---|
 | **Underlying framework** | Axum 0.8 | Actix-web 4 | Salvo 0.92 | Poem 3.1 | Rocket 0.5 |
 | **Request bodies** | Streamed | Buffered | Streamed | Streamed | Buffered (32 MiB cap) |
 | **Response bodies** | Streamed | Buffered | Streamed | Streamed | Streamed |
 | **Same-port WebSocket** | Yes | No | Yes | Yes | Yes (`rocket_ws`) |
-| **Separate-port WebSocket** | Yes | No — pair `toni-tungstenite` | Yes | Yes | No — pair `toni-tungstenite` |
+| **Separate-port WebSocket** | Yes | No — pair `ulo-ws-tungstenite` | Yes | Yes | No — pair `ulo-ws-tungstenite` |
 | **SSE / streaming responses** | Yes | No | Yes | Yes | Yes |
 | **Graceful shutdown** | Yes | Yes | Yes | Yes | Yes |
 | **Pre-bound listener** | Yes | Yes | Yes | Yes | No |
-| **405 response body** | Native | Toni envelope | Toni envelope | Native | Toni envelope |
+| **405 response body** | Native | Ulo envelope | Ulo envelope | Native | Ulo envelope |
 
-`toni-axum`, `toni-salvo`, and `toni-poem` cover the full capability surface: streaming in both directions and WebSocket in both deployment modes. `toni-axum` is the default choice — it pairs naturally with the Tokio ecosystem (sqlx, reqwest, tonic).
+`ulo-http-axum`, `ulo-http-salvo`, and `ulo-http-poem` cover the full capability surface: streaming in both directions and WebSocket in both deployment modes. `ulo-http-axum` is the default choice — it pairs naturally with the Tokio ecosystem (sqlx, reqwest, tonic).
 
-Reach for `toni-actix` or `toni-rocket` when you're integrating into an existing Actix-web or Rocket deployment. Both buffer request bodies; `toni-actix` also buffers responses, which rules out SSE and streaming downloads on that adapter.
+Reach for `ulo-http-actix` or `ulo-http-rocket` when you're integrating into an existing Actix-web or Rocket deployment. Both buffer request bodies; `ulo-http-actix` also buffers responses, which rules out SSE and streaming downloads on that adapter.
 
-A 404 is Toni's `{statusCode, message, error}` envelope on every adapter. A 405 is not: `toni-actix`, `toni-salvo`, and `toni-rocket` build the same envelope and add an `Allow` header, while `toni-axum` and `toni-poem` let their own router answer — an empty body on Axum, the text `method not allowed` on Poem, and only Axum sets `Allow`. A client that parses the error body needs to tolerate both shapes, or the application needs a global middleware that rewrites the 405 it sees on the way out.
+A 404 is Ulo's `{statusCode, message, error}` envelope on every adapter. A 405 is not: `ulo-http-actix`, `ulo-http-salvo`, and `ulo-http-rocket` build the same envelope and add an `Allow` header, while `ulo-http-axum` and `ulo-http-poem` let their own router answer — an empty body on Axum, the text `method not allowed` on Poem, and only Axum sets `Allow`. A client that parses the error body needs to tolerate both shapes, or the application needs a global middleware that rewrites the 405 it sees on the way out.
 
-[`toni-tungstenite`](/docs/websocket/separate-port) is what fills the two gaps in the separate-port row — it implements `WebSocketAdapter` and nothing else, so it registers alongside any HTTP adapter.
+[`ulo-ws-tungstenite`](/docs/websocket/separate-port) is what fills the two gaps in the separate-port row — it implements `WebSocketAdapter` and nothing else, so it registers alongside any HTTP adapter.
 
 ## The HttpAdapter trait
 
-Any HTTP server can back a Toni application by implementing `HttpAdapter`:
+Any HTTP server can back a Ulo application by implementing `HttpAdapter`:
 
 ```rust
-#[toni::async_trait]
+#[ulo::async_trait]
 pub trait HttpAdapter: Send + Sync + 'static {
     /// Register one HTTP route. Called at bootstrap for every route
     /// the framework discovers.
@@ -64,8 +64,8 @@ pub trait HttpAdapter: Send + Sync + 'static {
 
 The lifecycle:
 
-1. `app.use_http_adapter(adapter, ("127.0.0.1", 3000))` boxes the adapter (`ToniApplication` holds it as `Box<dyn HttpAdapter>`) and calls `register_route` for every resolved route.
-2. `app.bind()` calls `into_lifecycle`, which acquires the socket synchronously — port conflicts surface here as `StartupError::Adapter { transport: "http", .. }`, not inside a background task. Registration completes for every transport the application declares before any socket is acquired, so a declaration that cannot work fails with nothing bound. `toni-tcp` and `toni-udp` sit outside that ordering — each takes its socket while registering, so a port conflict on either is reported before another transport's misconfiguration is. The returned [`BoundAdapters`](/docs/api-reference/core) carries the bound addresses, so passing port `0` and reading the OS-assigned port works.
+1. `app.use_http_adapter(adapter, ("127.0.0.1", 3000))` boxes the adapter (`UloApplication` holds it as `Box<dyn HttpAdapter>`) and calls `register_route` for every resolved route.
+2. `app.bind()` calls `into_lifecycle`, which acquires the socket synchronously — port conflicts surface here as `StartupError::Adapter { transport: "http", .. }`, not inside a background task. Registration completes for every transport the application declares before any socket is acquired, so a declaration that cannot work fails with nothing bound. `ulo-rpc-tcp` and `ulo-rpc-udp` sit outside that ordering — each takes its socket while registering, so a port conflict on either is reported before another transport's misconfiguration is. The returned [`BoundAdapters`](/docs/api-reference/core) carries the bound addresses, so passing port `0` and reading the OS-assigned port works.
 3. `app.run()` drives the serve loop until [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) is triggered; a serve loop that returns on its own also shuts down the whole application. `app.start()` is `bind()` + `run()` in one step.
 
 The `AdapterContext` passed to `into_lifecycle` carries the global middleware chain; every adapter runs it *before* its own routing, so global middleware observes every request — including 404s, 405s, and same-port WebSocket upgrades — and a request rewritten in the chain changes which route matches.
@@ -89,16 +89,16 @@ Pair it with [`listenfd`](https://crates.io/crates/listenfd) to pick up a socket
 
 ```rust
 let mut fds = listenfd::ListenFd::from_env();
-let target: toni::BindTarget = match fds.take_tcp_listener(0)? {
+let target: ulo::BindTarget = match fds.take_tcp_listener(0)? {
     Some(listener) => listener.into(),
     None => ("127.0.0.1", 3000).into(),
 };
 app.use_http_adapter(AxumAdapter::new(), target)?;
 ```
 
-Toni reads no environment protocol itself — it accepts a listener and asks nothing about where it came from, so any supervisor works.
+Ulo reads no environment protocol itself — it accepts a listener and asks nothing about where it came from, so any supervisor works.
 
-`toni-rocket` is the exception: Rocket binds inside `launch()` from its own configuration, so passing it a listener fails at `app.bind()` with an error naming the limitation.
+`ulo-http-rocket` is the exception: Rocket binds inside `launch()` from its own configuration, so passing it a listener fails at `app.bind()` with an error naming the limitation.
 
 See [Development Workflow](/docs/getting-started/development-workflow) for the watch-restart loop, and [Bind Targets](/docs/techniques/bind-targets) for the full surface — including listener adoption on the WebSocket, TCP, UDP, and gRPC transports.
 

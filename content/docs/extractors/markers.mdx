@@ -12,7 +12,7 @@ fn create_user(&self, #[body] dto: CreateUserDto) -> Body {
 }
 ```
 
-Markers work in HTTP controllers only. The extraction markers are `#[body]`, `#[param]`, and `#[query]`; path-qualified spellings (`#[toni::body]`) work the same as the bare ones.
+Markers work in HTTP controllers only. The extraction markers are `#[body]`, `#[param]`, and `#[query]`; path-qualified spellings (`#[ulo::body]`) work the same as the bare ones.
 
 ## `#[body]`
 
@@ -82,7 +82,7 @@ fn search(
 
 `Option<T>` makes the parameter optional: missing → `None`. The sharp edge: a parameter that is present but unparseable still returns a 400, not `None` — `?limit=abc` for `Option<usize>` is an error, not an absent value.
 
-The name belongs to this mode only. `#[query("filters")] f: FilterSet` — a name on a type that is not one of the scalars above — does not compile: it reports ``cannot find type `Query` in crate `::toni` ``, which names the generated path rather than the parameter that produced it. Drop the name and take the whole struct with `#[query]`, or take `Query<FilterSet>`.
+The name belongs to this mode only. `#[query("filters")] f: FilterSet` — a name on a type that is not one of the scalars above — does not compile: it reports ``cannot find type `Query` in crate `::ulo` ``, which names the generated path rather than the parameter that produced it. Drop the name and take the whole struct with `#[query]`, or take `Query<FilterSet>`.
 
 ### Defaults
 
@@ -124,7 +124,7 @@ The value is parsed with `str::parse`, so the type needs `FromStr` — not `Dese
 `default` is not supported on `#[param]` — the argument parses but has no effect.
 
 <FromNest>
-These are the closest thing Toni has to `@Param()`, `@Query()`, and `@Body()`,
+These are the closest thing Ulo has to `@Param()`, `@Query()`, and `@Body()`,
 and they carry gotchas the typed extractors do not. `#[param]` ignores a
 `default`. A `#[query]` default that fails to parse panics when a request
 arrives rather than at startup. A marker cannot share a signature with a typed

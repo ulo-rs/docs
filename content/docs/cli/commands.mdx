@@ -1,16 +1,16 @@
 ---
 title: CLI Commands
-description: All toni-cli commands — project creation, resource generation, and the dev loop.
+description: All ulo-cli commands — project creation, resource generation, and the dev loop.
 ---
 
-The CLI has three commands: `toni new`, `toni generate resource`, and `toni dev`.
+The CLI has three commands: `ulo new`, `ulo generate resource`, and `ulo dev`.
 
-## toni new
+## ulo new
 
-Create a new Toni project from a starter template.
+Create a new Ulo project from a starter template.
 
 ```bash
-toni new <project-name>
+ulo new <project-name>
 ```
 
 The project name may contain only alphanumerics, `-`, and `_`. The command fails if a directory with that name already exists.
@@ -18,7 +18,7 @@ The project name may contain only alphanumerics, `-`, and `_`. The command fails
 **Example:**
 
 ```bash
-toni new my_api
+ulo new my_api
 # ✅ Successfully created project 'my_api'!
 #
 # Next steps:
@@ -40,18 +40,18 @@ my_api/
         └── app.service.rs
 ```
 
-`Cargo.toml` pins `toni = "0.2.0"`, `toni-axum = "0.1.0"`, and `tokio` with full features. The generated `main.rs`:
+`Cargo.toml` pins `ulo = "0.2.0"`, `ulo-http-axum = "0.1.0"`, and `tokio` with full features. The generated `main.rs`:
 
 ```rust
 use app::app_module::AppModule;
-use toni::ToniFactory;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo_http_axum::AxumAdapter;
 
 mod app;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::new()
+    let mut app = UloFactory::new()
         .create_with(AppModule)
         .await.unwrap();
 
@@ -64,12 +64,12 @@ async fn main() {
 
 `AppController` serves `POST`/`GET`/`PUT`/`DELETE` at `http://127.0.0.1:3000/app`, each delegating to a matching `AppService` method. The dotted file names are mapped to Rust modules with `#[path]` attributes in `src/app/mod.rs` — see [Project Structure](/docs/getting-started/project-structure).
 
-## toni generate resource
+## ulo generate resource
 
 Generate a CRUD resource — module, controller, and service — and wire it into the application.
 
 ```bash
-toni generate resource <name>
+ulo generate resource <name>
 ```
 
 Run it from the project root (the command edits files under `src/app/`). `resource` is the only generator type; there are no separate `module`/`controller`/`service` generators.
@@ -77,7 +77,7 @@ Run it from the project root (the command edits files under `src/app/`). `resour
 **Example:**
 
 ```bash
-toni generate resource users
+ulo generate resource users
 ```
 
 Creates `src/app/users/`:
@@ -101,8 +101,8 @@ Type names are the input name with the first letter uppercased (`users` → `Use
 
 ```rust
 use super::users_service::UsersService;
-use toni::extractors::Path;
-use toni::*;
+use ulo::extractors::Path;
+use ulo::*;
 
 #[controller("/users")]
 pub struct UsersController {
@@ -142,7 +142,7 @@ impl UsersController {
 ### Generated service
 
 ```rust
-use toni::*;
+use ulo::*;
 
 #[injectable]
 pub struct UsersService;
@@ -173,7 +173,7 @@ impl UsersService {
 ### Generated module
 
 ```rust
-use toni::*;
+use ulo::*;
 
 use super::users_controller::UsersController;
 use super::users_service::UsersService;
@@ -189,12 +189,12 @@ impl UsersModule {}
 
 The stub methods return placeholder strings — replace them with real logic and typed responses (see [Quick Start](/docs/getting-started/quick-start)).
 
-## toni dev
+## ulo dev
 
 Run the application and restart it whenever a source file changes.
 
 ```bash
-toni dev
+ulo dev
 ```
 
 Run it from the project root. On start it runs `cargo run`; on every save of a `.rs` or `.toml` file it rebuilds and restarts the process. Changes are throttled at 250ms, so a burst of saves triggers one rebuild. Paths in `.gitignore` (plus `target/` and `.git/`) are excluded from watching. Ctrl-C stops the watcher and the application.
@@ -202,12 +202,12 @@ Run it from the project root. On start it runs `cargo run`; on every save of a `
 A restart sends SIGTERM and waits two seconds before SIGKILL. A generated app has no signal handlers and exits at once; an app that wires [`shutdown_handle()`](/docs/techniques/graceful-shutdown) gets that window to drain.
 
 ```
-[toni dev] watching /path/to/my_api — running `cargo run` (Ctrl-C to stop)
+[ulo dev] watching /path/to/my_api — running `cargo run` (Ctrl-C to stop)
    Compiling my_api v0.1.0
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.31s
      Running `target/debug/my_api`
 ...
-[toni dev] change detected, restarting
+[ulo dev] change detected, restarting
 ```
 
 If a rebuild fails, the compile errors are printed and the previous process stays down; the next save triggers another attempt.
@@ -226,7 +226,7 @@ If a rebuild fails, the compile errors are printed and the previous process stay
 - `-- <args>` — everything after `--` is passed to the application binary
 
 ```bash
-toni dev --release -- --config config/local.toml
+ulo dev --release -- --config config/local.toml
 ```
 
 ### Choosing what cargo builds
@@ -234,7 +234,7 @@ toni dev --release -- --config config/local.toml
 Cargo stops reading its own flags at the `--`, so a target or feature selector belongs before it:
 
 ```bash
-toni dev -p my-api --example demo -F tls -- --config config/local.toml
+ulo dev -p my-api --example demo -F tls -- --config config/local.toml
 ```
 
 `--bin` and `--example` are refused together — a run has one target.
@@ -242,7 +242,7 @@ toni dev -p my-api --example demo -F tls -- --config config/local.toml
 Flags outside that list go through `--cargo-arg`, one argument per occurrence:
 
 ```bash
-toni dev --cargo-arg --offline --cargo-arg --timings
+ulo dev --cargo-arg --offline --cargo-arg --timings
 ```
 
 The cargo command is assembled in a fixed order: `run`, `--release`, the target selector (`--package`/`--bin`/`--example`), `--features`, `--all-features`, `--no-default-features`, the `--cargo-arg` values in the order given, then `--` and the application arguments.
@@ -252,8 +252,8 @@ The cargo command is assembled in a fixed order: `run`, `--release`, the target 
 By default the server is down while a rebuild runs, and connections are refused until the new process binds. `--listen` closes that gap: the socket is bound once by the watcher and passed to every restart, so requests arriving mid-rebuild wait in the kernel accept queue and are answered by the new process instead of failing.
 
 ```bash
-toni dev --listen 3000
-# [toni dev] holding 127.0.0.1:3000 — passing it to each restart
+ulo dev --listen 3000
+# [ulo dev] holding 127.0.0.1:3000 — passing it to each restart
 ```
 
 A bare port means localhost; pass `host:port` to bind elsewhere. The socket is announced through the systemd socket-activation variables (`LISTEN_FDS`), so the application has to adopt it rather than bind its own:
@@ -274,5 +274,5 @@ Keep the fallback branch — it is what lets the binary still run on its own, ou
 The same code path serves systemd socket activation in production, which uses the same protocol.
 
 <Callout type="warn">
-Rocket is the exception: it binds through its own configuration and refuses a pre-bound listener, so `--listen` does not work with `toni-rocket`.
+Rocket is the exception: it binds through its own configuration and refuses a pre-bound listener, so `--listen` does not work with `ulo-http-rocket`.
 </Callout>

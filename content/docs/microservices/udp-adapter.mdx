@@ -11,19 +11,19 @@ Add the dependencies:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-udp = "0.1"
+ulo = "0.2"
+ulo-rpc-udp = "0.1"
 ```
 
 Register the adapter:
 
 ```rust
-use toni::ToniFactory;
-use toni_udp::UdpAdapter;
+use ulo::UloFactory;
+use ulo_rpc_udp::UdpAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(UdpAdapter::new("0.0.0.0", 4000))?;
     app.start().await?;
     Ok(())
@@ -95,8 +95,8 @@ Losing a datagram costs more on a stream than on a single call. A lost `end` orp
 `UdpClientTransport` binds one ephemeral socket connected to the remote address. Request-response uses correlation ids; a background reader routes each reply datagram to the waiting caller:
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_udp::UdpClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_udp::UdpClientTransport;
 
 provider_value!(
     "ORDERS_CLIENT",

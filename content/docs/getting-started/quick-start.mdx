@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Build a working Toni application end-to-end in minutes.
+description: Build a working Ulo application end-to-end in minutes.
 ---
 
 This guide walks through building a small REST API with a user resource. By the end you'll have a running server with a controller, a service, and proper module wiring.
@@ -10,13 +10,13 @@ This guide walks through building a small REST API with a user resource. By the 
 Scaffold a project with the CLI, then add serde for the data types in this guide:
 
 ```bash
-toni new users_api
+ulo new users_api
 cd users_api
 cargo add serde --features derive
 cargo add serde_json
 ```
 
-`toni new` generates `src/main.rs` plus an `src/app/` directory holding the root module, a controller, and a service (see [Project Structure](/docs/getting-started/project-structure)). The next three steps replace the generated `app.service.rs`, `app.controller.rs`, and `app.module.rs` with the user resource.
+`ulo new` generates `src/main.rs` plus an `src/app/` directory holding the root module, a controller, and a service (see [Project Structure](/docs/getting-started/project-structure)). The next three steps replace the generated `app.service.rs`, `app.controller.rs`, and `app.module.rs` with the user resource.
 
 <Steps>
 
@@ -28,7 +28,7 @@ Services hold business logic. The `#[injectable]` attribute sits on the struct a
 
 ```rust title="src/app/app.service.rs"
 use serde::Serialize;
-use toni::*;
+use ulo::*;
 
 #[derive(Clone, Serialize)]
 pub struct User {
@@ -64,8 +64,8 @@ Controllers map HTTP routes to methods. `#[controller]` takes a base path and si
 
 ```rust title="src/app/app.controller.rs"
 use serde::Deserialize;
-use toni::extractors::{Json, Path};
-use toni::*;
+use ulo::extractors::{Json, Path};
+use ulo::*;
 
 use super::app_service::UserService;
 
@@ -116,7 +116,7 @@ impl UserController {
 Modules declare which controllers and services belong together. The generated `app.module.rs` already defines the root module — point it at the new types:
 
 ```rust title="src/app/app.module.rs"
-use toni::*;
+use ulo::*;
 
 use super::app_controller::UserController;
 use super::app_service::UserService;
@@ -130,7 +130,7 @@ use super::app_service::UserService;
 impl AppModule {}
 ```
 
-As the application grows, features get their own modules listed under `imports:` — `toni generate resource <name>` scaffolds and wires one in a single step.
+As the application grows, features get their own modules listed under `imports:` — `ulo generate resource <name>` scaffolds and wires one in a single step.
 
 </Step>
 
@@ -142,14 +142,14 @@ The generated `src/main.rs` needs no changes:
 
 ```rust title="src/main.rs"
 use app::app_module::AppModule;
-use toni::ToniFactory;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo_http_axum::AxumAdapter;
 
 mod app;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::new()
+    let mut app = UloFactory::new()
         .create_with(AppModule)
         .await.unwrap();
 
@@ -160,7 +160,7 @@ async fn main() {
 }
 ```
 
-`ToniFactory::create(AppModule)` is a shorthand for `ToniFactory::new().create_with(AppModule)` — use the explicit form when registering global guards, interceptors, or middleware on the factory first.
+`UloFactory::create(AppModule)` is a shorthand for `UloFactory::new().create_with(AppModule)` — use the explicit form when registering global guards, interceptors, or middleware on the factory first.
 
 Run it:
 
@@ -189,7 +189,7 @@ curl -X POST http://localhost:3000/users \
 
 ## What happens at startup
 
-When `create_with` (or `create`) is called, Toni:
+When `create_with` (or `create`) is called, Ulo:
 
 1. Scans the module tree starting from `AppModule`
 2. Builds a dependency graph from all declared providers and controllers

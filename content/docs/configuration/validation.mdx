@@ -3,13 +3,13 @@ title: Configuration Validation
 description: Validate configuration values at startup using the validator crate.
 ---
 
-Configuration validation catches bad environment values before the server starts accepting requests. `toni-config` integrates with the `validator` crate — the presence of `#[validate(...)]` attributes on your config fields is the opt-in. There is no Cargo feature to enable; a config without `#[validate]` attributes never references the `validator` crate.
+Configuration validation catches bad environment values before the server starts accepting requests. `ulo-config` integrates with the `validator` crate — the presence of `#[validate(...)]` attributes on your config fields is the opt-in. There is no Cargo feature to enable; a config without `#[validate]` attributes never references the `validator` crate.
 
 ## Setup
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni-config = "0.1"
+ulo-config = "0.1"
 validator = { version = "0.20", features = ["derive"] }
 ```
 
@@ -18,7 +18,7 @@ validator = { version = "0.20", features = ["derive"] }
 Derive `Validate` alongside `Config` and add `#[validate(...)]` constraints:
 
 ```rust
-use toni_config::Config;
+use ulo_config::Config;
 use validator::Validate;
 
 #[derive(Config, Validate, Clone)]
@@ -59,7 +59,7 @@ Loading and validating are one step — there is no separate `load_and_validate(
 A failing constraint prevents the module from being constructed, and the application never starts with an invalid configuration:
 
 ```rust
-use toni_config::{Config, ConfigModule};
+use ulo_config::{Config, ConfigModule};
 
 fn main() {
     match ConfigModule::<AppConfig>::from_env() {

@@ -20,13 +20,13 @@ pub enum BindTarget {
 The common shapes convert directly — `From<(&str, u16)>`, `From<(String, u16)>`, and `From<std::net::TcpListener>`:
 
 ```rust
-let by_addr: toni::BindTarget = ("127.0.0.1", 3000).into();
+let by_addr: ulo::BindTarget = ("127.0.0.1", 3000).into();
 
 let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-let by_listener: toni::BindTarget = listener.into();
+let by_listener: ulo::BindTarget = listener.into();
 ```
 
-`into_std_listener()` resolves either form to a bound listener — it binds for `Addr` and passes a `Listener` through untouched. That is the method [custom adapters](/docs/http-adapters/custom) call. The enum is `#[non_exhaustive]`, so a `match` outside the `toni` crate needs a wildcard arm.
+`into_std_listener()` resolves either form to a bound listener — it binds for `Addr` and passes a `Listener` through untouched. That is the method [custom adapters](/docs/http-adapters/custom) call. The enum is `#[non_exhaustive]`, so a `match` outside the `ulo` crate needs a wildcard arm.
 
 ## HTTP
 
@@ -44,7 +44,7 @@ app.use_http_adapter(AxumAdapter::new(), listener)?;
 Either way, `app.bind()` returns the actual address in [`BoundAdapters`](/docs/api-reference/core) — which is how port `0` works: pass it, read back what the OS assigned.
 
 <Callout type="warn">
-`toni-axum`, `toni-actix`, `toni-salvo`, and `toni-poem` all adopt a pre-bound listener. `toni-rocket` cannot — Rocket binds inside `launch()` from its own figment config — so handing it a `Listener` fails at `app.bind()` with an error saying to pass a `(host, port)` address instead. The [adapter capability table](/docs/http-adapters#official-adapters) tracks this.
+`ulo-http-axum`, `ulo-http-actix`, `ulo-http-salvo`, and `ulo-http-poem` all adopt a pre-bound listener. `ulo-http-rocket` cannot — Rocket binds inside `launch()` from its own figment config — so handing it a `Listener` fails at `app.bind()` with an error saying to pass a `(host, port)` address instead. The [adapter capability table](/docs/http-adapters#official-adapters) tracks this.
 </Callout>
 
 ## Taking an inherited socket, with a fallback
@@ -53,14 +53,14 @@ A launcher that owns the socket announces it through the `LISTEN_FDS` file-descr
 
 ```rust
 let mut fds = listenfd::ListenFd::from_env();
-let target: toni::BindTarget = match fds.take_tcp_listener(0)? {
+let target: ulo::BindTarget = match fds.take_tcp_listener(0)? {
     Some(listener) => listener.into(),
     None => ("127.0.0.1", 3000).into(),
 };
 app.use_http_adapter(AxumAdapter::new(), target)?;
 ```
 
-`examples/socket_activation.rs` in the repository is the runnable version. The same adoption code serves two launchers: `toni dev --listen 3000` in [development](/docs/getting-started/development-workflow#keeping-the-port-alive-across-restarts), and systemd socket activation in [production](/docs/deployment/production).
+`examples/socket_activation.rs` in the repository is the runnable version. The same adoption code serves two launchers: `ulo dev --listen 3000` in [development](/docs/getting-started/development-workflow#keeping-the-port-alive-across-restarts), and systemd socket activation in [production](/docs/deployment/production).
 
 ## WebSocket
 
@@ -87,4 +87,4 @@ Each replaces the `new(host, port)` / `new(addr)` form; everything else about th
 
 ## No environment protocol in core
 
-Toni itself reads no `LISTEN_FDS` and checks no `LISTEN_PID` — it accepts a listener and asks nothing about where it came from. Announcing the socket is the launcher's job (`toni dev --listen`, [`systemfd`](https://crates.io/crates/systemfd), systemd); claiming it is the application's, via `listenfd`. That split is what lets one binary run under any of them, or none.
+Ulo itself reads no `LISTEN_FDS` and checks no `LISTEN_PID` — it accepts a listener and asks nothing about where it came from. Announcing the socket is the launcher's job (`ulo dev --listen`, [`systemfd`](https://crates.io/crates/systemfd), systemd); claiming it is the application's, via `listenfd`. That split is what lets one binary run under any of them, or none.

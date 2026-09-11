@@ -1,21 +1,21 @@
 ---
 title: Introduction
-description: What Toni is, why it exists, and when to reach for it.
+description: What Ulo is, why it exists, and when to reach for it.
 ---
 
-Toni is a Rust framework for building server-side applications. It brings a structured, modular approach to Rust web development: your application is organized into **modules**, each containing **controllers** that handle HTTP routes and **services** that hold business logic. Dependencies flow between them through a built-in injection container.
+Ulo is a Rust framework for building server-side applications. It brings a structured, modular approach to Rust web development: your application is organized into **modules**, each containing **controllers** that handle HTTP routes and **services** that hold business logic. Dependencies flow between them through a built-in injection container.
 
-If you have built applications with NestJS, most of Toni has a direct counterpart — modules, controllers, injectable providers, and the guard/interceptor chain. [Coming from NestJS](/docs/coming-from-nestjs) maps the two, ports a small application line by line, and lists the places where Toni diverges.
+If you have built applications with NestJS, most of Ulo has a direct counterpart — modules, controllers, injectable providers, and the guard/interceptor chain. [Coming from NestJS](/docs/coming-from-nestjs) maps the two, ports a small application line by line, and lists the places where Ulo diverges.
 
-## Why Toni exists
+## Why Ulo exists
 
 Rust web development typically hands you low-level primitives: an HTTP router, a runtime, maybe an extractor pattern. That's powerful, but it leaves architectural decisions entirely up to you. For small services that's fine. For larger applications — with authentication layers, background jobs, multiple data sources, complex initialization sequences — you end up building the same structural scaffolding from scratch every time.
 
-Toni provides that scaffolding without dictating your HTTP server. Write your application logic once; plug in the adapter for the server you want (or bring your own).
+Ulo provides that scaffolding without dictating your HTTP server. Write your application logic once; plug in the adapter for the server you want (or bring your own).
 
-## What Toni is not
+## What Ulo is not
 
-Toni is not an HTTP server. It does not handle the actual socket connections, TLS, or HTTP parsing. Those concerns belong to the adapter you choose. Toni's job is to organize your application: resolve dependencies, route requests through the middleware/guard/interceptor chain, and manage the lifecycle of your modules.
+Ulo is not an HTTP server. It does not handle the actual socket connections, TLS, or HTTP parsing. Those concerns belong to the adapter you choose. Ulo's job is to organize your application: resolve dependencies, route requests through the middleware/guard/interceptor chain, and manage the lifecycle of your modules.
 
 ## Key concepts at a glance
 
@@ -33,15 +33,15 @@ Toni is not an HTTP server. It does not handle the actual socket connections, TL
 
 ## HTTP adapters
 
-Toni decouples application logic from the HTTP runtime. Five official adapters ship with the framework:
+Ulo decouples application logic from the HTTP runtime. Five official adapters ship with the framework:
 
-- **`toni-axum`** — built on [Axum](https://github.com/tokio-rs/axum), Tokio-based, great for I/O-heavy workloads
-- **`toni-actix`** — built on [Actix-web](https://actix.rs/), excellent for CPU-intensive request handling
-- **`toni-salvo`** — built on [Salvo](https://salvo.rs/)
-- **`toni-poem`** — built on [Poem](https://github.com/poem-web/poem)
-- **`toni-rocket`** — built on [Rocket](https://rocket.rs/)
+- **`ulo-http-axum`** — built on [Axum](https://github.com/tokio-rs/axum), Tokio-based, great for I/O-heavy workloads
+- **`ulo-http-actix`** — built on [Actix-web](https://actix.rs/), excellent for CPU-intensive request handling
+- **`ulo-http-salvo`** — built on [Salvo](https://salvo.rs/)
+- **`ulo-http-poem`** — built on [Poem](https://github.com/poem-web/poem)
+- **`ulo-http-rocket`** — built on [Rocket](https://rocket.rs/)
 
-All adapters expose the same Toni API. Switching between them is a one-line change. See [HTTP Adapters](/docs/http-adapters) for the feature matrix.
+All adapters expose the same Ulo API. Switching between them is a one-line change. See [HTTP Adapters](/docs/http-adapters) for the feature matrix.
 
 ## Beyond HTTP
 
@@ -49,11 +49,11 @@ The same module/controller/DI model extends to other protocols:
 
 - [WebSocket gateways](/docs/websocket/gateways) — message handlers, rooms, broadcasting
 - [RPC microservices](/docs/microservices) — pattern-based messaging over TCP, UDP, NATS, Redis, RabbitMQ, MQTT, or Kafka
-- [gRPC](/docs/grpc) — contract-first services via `toni-grpc`
+- [gRPC](/docs/grpc) — contract-first services via `ulo-grpc`
 - [Server-Sent Events](/docs/techniques/sse) and [GraphQL](/docs/graphql)
 
 Guards, interceptors, and error handlers run on HTTP, WebSocket, RPC, and gRPC handlers alike.
 
 ## Ready to build?
 
-Head to [Installation](/docs/getting-started/installation) to add Toni to your project, or jump straight to the [Quick Start](/docs/getting-started/quick-start) to see a complete working application.
+Head to [Installation](/docs/getting-started/installation) to add Ulo to your project, or jump straight to the [Quick Start](/docs/getting-started/quick-start) to see a complete working application.

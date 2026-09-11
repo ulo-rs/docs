@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Add Toni to a new or existing Rust project.
+description: Add Ulo to a new or existing Rust project.
 ---
 
 ## Prerequisites
@@ -10,11 +10,11 @@ description: Add Toni to a new or existing Rust project.
 
 ## Option A — Start from a template with the CLI
 
-The fastest way to get a working Toni project is through the CLI:
+The fastest way to get a working Ulo project is through the CLI:
 
 ```bash
-cargo install toni-cli
-toni new my_app
+cargo install ulo-cli
+ulo new my_app
 cd my_app
 cargo run
 ```
@@ -23,7 +23,7 @@ This scaffolds a project with `AppModule`, `AppController`, and `AppService` wir
 
 ## Option B — Add to an existing project
 
-Add the core crate and exactly one HTTP adapter. The Toni API is identical
+Add the core crate and exactly one HTTP adapter. The Ulo API is identical
 across all five — controllers, guards, interceptors, extractors, and global
 middleware behave the same. What differs is the runtime attribute, the server
 crate, and a handful of capabilities.
@@ -34,18 +34,18 @@ crate, and a handful of capabilities.
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-axum = "0.1"
+ulo = "0.2"
+ulo-http-axum = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust title="src/main.rs"
-use toni::ToniFactory;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -58,18 +58,18 @@ The default. Streaming bodies both ways, and WebSocket on the HTTP port or its o
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-actix = "0.1"
+ulo = "0.2"
+ulo-http-actix = "0.1"
 actix-web = "4"
 ```
 
 ```rust title="src/main.rs"
-use toni::ToniFactory;
-use toni_actix::ActixAdapter;
+use ulo::UloFactory;
+use ulo_http_actix::ActixAdapter;
 
 #[actix_web::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(ActixAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -82,18 +82,18 @@ Runs on Actix's own runtime. Buffers request and response bodies, and does not i
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-salvo = "0.1"
+ulo = "0.2"
+ulo-http-salvo = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust title="src/main.rs"
-use toni::ToniFactory;
-use toni_salvo::SalvoAdapter;
+use ulo::UloFactory;
+use ulo_http_salvo::SalvoAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(SalvoAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -106,18 +106,18 @@ Streaming bodies and WebSocket on either port. TRACE and CONNECT match by path r
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-poem = "0.1"
+ulo = "0.2"
+ulo-http-poem = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust title="src/main.rs"
-use toni::ToniFactory;
-use toni_poem::PoemAdapter;
+use ulo::UloFactory;
+use ulo_http_poem::PoemAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(PoemAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -130,18 +130,18 @@ Streaming bodies and WebSocket on either port. Rewrites `{param}` to `:param` wh
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-rocket = "0.1"
+ulo = "0.2"
+ulo-http-rocket = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust title="src/main.rs"
-use toni::ToniFactory;
-use toni_rocket::RocketAdapter;
+use ulo::UloFactory;
+use ulo_http_rocket::RocketAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(RocketAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -161,7 +161,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
 
-The `toni` crate's default `logger` feature installs a `tracing` subscriber at
+The `ulo` crate's default `logger` feature installs a `tracing` subscriber at
 startup, so an application logs to stderr with no setup — `default-features = false`
 compiles it out. See [Logging](/docs/techniques/logging).
 
@@ -169,16 +169,16 @@ compiles it out. See [Logging](/docs/techniques/logging).
 
 | Crate | Purpose |
 |-------|---------|
-| `toni-config` | Environment-based configuration with optional validation |
-| `toni-async-graphql` | GraphQL via `async-graphql` |
-| `toni-juniper` | GraphQL via `juniper` |
+| `ulo-config` | Environment-based configuration with optional validation |
+| `ulo-graphql-async-graphql` | GraphQL via `async-graphql` |
+| `ulo-graphql-juniper` | GraphQL via `juniper` |
 
 That is the whole of `main`. Modules, controllers, and services live in your own
 code and are wired together by the container at startup. To compare the adapters
 in detail before committing to one, see [HTTP Adapters](/docs/http-adapters).
 
 <FromNest>
-`ToniFactory::create(AppModule)` takes the root module like `NestFactory.create`,
+`UloFactory::create(AppModule)` takes the root module like `NestFactory.create`,
 but there is no `app.listen(3000)` and no `app.init()`. The HTTP server is chosen
 separately, by `use_http_adapter` — that call is also what registers the routes.
 Startup is three phases: `create` resolves the dependency graph, `bind` acquires

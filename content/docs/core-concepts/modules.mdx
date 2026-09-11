@@ -1,9 +1,9 @@
 ---
 title: Modules
-description: The organizational unit of a Toni application — how modules group, share, and isolate application components.
+description: The organizational unit of a Ulo application — how modules group, share, and isolate application components.
 ---
 
-Modules are the primary organizational unit in Toni. Each module is a struct annotated with `#[module]` that declares:
+Modules are the primary organizational unit in Ulo. Each module is a struct annotated with `#[module]` that declares:
 
 - **`controllers`** — the dispatch targets owned by this module: HTTP controllers, RPC controllers, gRPC services
 - **`providers`** — the services and values managed by this module's DI scope
@@ -13,7 +13,7 @@ Modules are the primary organizational unit in Toni. Each module is a struct ann
 ## Basic module
 
 ```rust
-use toni::module;
+use ulo::module;
 
 #[module(
     controllers: [UsersController],
@@ -62,7 +62,7 @@ pub struct UsersModule;
 
 ## The module tree
 
-Every application has a root module. `ToniFactory::create` starts scanning from there, recursively resolving the full module graph.
+Every application has a root module. `UloFactory::create` starts scanning from there, recursively resolving the full module graph.
 
 ```rust title="app_module.rs"
 #[module(
@@ -77,7 +77,7 @@ pub struct AppModule;
 // main.rs
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000))?;
     app.start().await?;
     Ok(())
@@ -111,7 +111,7 @@ Every module in the application can now inject `LoggerService`, `ConfigService`,
 
 ## Lifecycle hooks on modules
 
-Attach lifecycle callbacks directly to the module by switching from `pub struct` to `impl` and declaring the hooks inside that block. Module hooks share the provider hook shape — `async fn`, with startup hooks returning `toni::InitResult` — and run before the provider hooks of the same phase:
+Attach lifecycle callbacks directly to the module by switching from `pub struct` to `impl` and declaring the hooks inside that block. Module hooks share the provider hook shape — `async fn`, with startup hooks returning `ulo::InitResult` — and run before the provider hooks of the same phase:
 
 ```rust
 #[module(
@@ -120,7 +120,7 @@ Attach lifecycle callbacks directly to the module by switching from `pub struct`
 )]
 impl DatabaseModule {
     #[on_module_init]
-    async fn init(&self) -> toni::InitResult {
+    async fn init(&self) -> ulo::InitResult {
         println!("DatabaseModule initialized");
         Ok(())
     }
@@ -134,7 +134,7 @@ See [Lifecycle Hooks](/docs/core-concepts/lifecycle-hooks) for the full sequence
 The `impl` form also accepts a `configure_middleware` method for applying middleware to route patterns:
 
 ```rust
-use toni::traits_helpers::MiddlewareConsumer;
+use ulo::traits_helpers::MiddlewareConsumer;
 
 #[module(controllers: [UsersController], providers: [RequestTrackingMiddleware])]
 impl UsersModule {
@@ -168,10 +168,10 @@ For cases where a module's configuration depends on runtime values (connection s
 pub struct AppModule;
 ```
 
-`DynamicModule` is a first-class framework type: a module whose providers and exports are determined at runtime rather than compile time. All integration crates (`toni-seaorm`, `toni-redis`, …) implement their `for_root` functions with it, and you can build your own:
+`DynamicModule` is a first-class framework type: a module whose providers and exports are determined at runtime rather than compile time. All integration crates (`ulo-db-seaorm`, `ulo-db-redis`, …) implement their `for_root` functions with it, and you can build your own:
 
 ```rust
-use toni::DynamicModule;
+use ulo::DynamicModule;
 
 pub struct FeatureFlagsModule;
 
@@ -202,8 +202,8 @@ Two calls with **different** configuration are different modules. If both export
 The trait is five required methods plus defaulted ones:
 
 ```rust
-use toni::ModuleIdentity;
-use toni::traits_helpers::{ControllerFactory, ModuleMetadata, ProviderFactory};
+use ulo::ModuleIdentity;
+use ulo::traits_helpers::{ControllerFactory, ModuleMetadata, ProviderFactory};
 
 pub struct MetricsModule {
     endpoint: String,
@@ -238,7 +238,7 @@ impl ModuleMetadata for MetricsModule {
     }
 
     fn exports(&self) -> Option<Vec<String>> {
-        Some(vec![toni::di::token_of::<MetricsSink>()])
+        Some(vec![ulo::di::token_of::<MetricsSink>()])
     }
 }
 ```

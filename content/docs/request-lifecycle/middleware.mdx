@@ -13,8 +13,8 @@ Middleware runs at two positions:
 ## The Middleware trait
 
 ```rust
-use toni::async_trait;
-use toni::middleware::{Middleware, MiddlewareResult, NextHandle};
+use ulo::async_trait;
+use ulo::middleware::{Middleware, MiddlewareResult, NextHandle};
 
 #[async_trait]
 pub trait Middleware: Send + Sync {
@@ -39,9 +39,9 @@ pub trait Middleware: Send + Sync {
 
 ```rust
 use serde_json::json;
-use toni::async_trait;
-use toni::http_helpers::{Body, HttpResponse};
-use toni::middleware::{Middleware, MiddlewareResult, NextHandle};
+use ulo::async_trait;
+use ulo::http_helpers::{Body, HttpResponse};
+use ulo::middleware::{Middleware, MiddlewareResult, NextHandle};
 
 struct AuthMiddleware {
     valid_token: String,
@@ -103,9 +103,9 @@ Registered on the factory; runs before routing on every request:
 
 ```rust
 use std::sync::Arc;
-use toni::ToniFactory;
+use ulo::UloFactory;
 
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_middleware(Arc::new(LoggerMiddleware));
 
 let mut app = factory.create_with(AppModule).await?;
@@ -118,7 +118,7 @@ app.start().await?;
 Modules declare route-matched middleware in a `configure_middleware` method — use the `#[module]` attribute on an `impl` block:
 
 ```rust
-use toni::traits_helpers::MiddlewareConsumer;
+use ulo::traits_helpers::MiddlewareConsumer;
 
 #[module(controllers: [ApiController], providers: [])]
 impl AppModule {
@@ -198,7 +198,7 @@ For one-off logic, a closure can stand in for a trait impl:
 
 ```rust
 use std::sync::Arc;
-use toni::middleware::{FunctionalMiddleware, MiddlewareFn};
+use ulo::middleware::{FunctionalMiddleware, MiddlewareFn};
 
 let log_fn: MiddlewareFn = Arc::new(|next| {
     Box::pin(async move {
@@ -232,7 +232,7 @@ post-routing, on the matched route only.
 The body arrives as `RequestBody::Streaming` — a one-time consumable stream. Middleware that only reads headers should pass the request through untouched. Middleware that must inspect the body has to buffer it and put it back, otherwise the handler receives an empty body:
 
 ```rust
-use toni::http_helpers::{HttpRequest, RequestBody};
+use ulo::http_helpers::{HttpRequest, RequestBody};
 
 #[async_trait]
 impl Middleware for BodyInspector {
@@ -270,11 +270,11 @@ See [Error Handling](/docs/request-lifecycle/error-handling).
 
 ## Tower layers
 
-With the `tower-compat` feature enabled on `toni`, `tower::Layer` middleware plugs into the consumer directly:
+With the `tower-compat` feature enabled on `ulo`, `tower::Layer` middleware plugs into the consumer directly:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = { version = "0.2", features = ["tower-compat"] }
+ulo = { version = "0.2", features = ["tower-compat"] }
 ```
 
 ```rust

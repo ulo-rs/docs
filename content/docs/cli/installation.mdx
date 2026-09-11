@@ -1,33 +1,33 @@
 ---
 title: CLI Installation
-description: Install the Toni CLI to scaffold new projects and generate resources.
+description: Install the Ulo CLI to scaffold new projects and generate resources.
 ---
 
-The Toni CLI (`toni-cli`) scaffolds new projects, generates CRUD resources (module + controller + service, wired in automatically), and runs the development watch loop from the terminal.
+The Ulo CLI (`ulo-cli`) scaffolds new projects, generates CRUD resources (module + controller + service, wired in automatically), and runs the development watch loop from the terminal.
 
 ## Install
 
 ```bash
-cargo install toni-cli
+cargo install ulo-cli
 ```
 
-The `toni dev` command sits behind a default-on `dev` feature carrying the file-watcher dependencies. For a scaffolding-only install that builds faster:
+The `ulo dev` command sits behind a default-on `dev` feature carrying the file-watcher dependencies. For a scaffolding-only install that builds faster:
 
 ```bash
-cargo install toni-cli --no-default-features
+cargo install ulo-cli --no-default-features
 ```
 
 Verify installation — the version printed matches the installed crate version:
 
 ```bash
-toni --version
-# toni 0.1.2
+ulo --version
+# ulo 0.1.2
 ```
 
 ## Updating
 
 ```bash
-cargo install toni-cli --force
+cargo install ulo-cli --force
 ```
 
 ## Requirements

@@ -1,21 +1,21 @@
 ---
 title: Microservices Overview
-description: How Toni handles inter-service communication through pluggable transport adapters and pattern-matched message routing.
+description: How Ulo handles inter-service communication through pluggable transport adapters and pattern-matched message routing.
 ---
 
-Toni supports microservice communication through an **RPC transport layer** that is completely decoupled from HTTP. The same module and DI system used for HTTP controllers applies to RPC — services share one container, controllers get injected dependencies, lifecycle hooks run the same way.
+Ulo supports microservice communication through an **RPC transport layer** that is completely decoupled from HTTP. The same module and DI system used for HTTP controllers applies to RPC — services share one container, controllers get injected dependencies, lifecycle hooks run the same way.
 
 ## How it works
 
 An RPC application runs alongside (or instead of) an HTTP server. After creating the application, register a transport adapter and start:
 
 ```rust
-use toni::ToniFactory;
-use toni_tcp::TcpAdapter;
+use ulo::UloFactory;
+use ulo_rpc_tcp::TcpAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(TcpAdapter::new("0.0.0.0", 4000))?;
     app.start().await?;
     Ok(())
@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
 HTTP and RPC can run on the same application instance:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await?;
+let mut app = UloFactory::create(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000))?;
 app.use_rpc_adapter(TcpAdapter::new("0.0.0.0", 4000))?;
 app.start().await?;
@@ -33,7 +33,7 @@ app.start().await?;
 
 An application holds one RPC adapter — a second `use_rpc_adapter` call replaces the first. To serve the same controllers over two transports, create two application instances from the same module.
 
-gRPC is not part of this layer: it is contract-first — services and messages are declared in `.proto` files and known at compile time — which does not fit the pattern-string + payload model. It registers separately via `use_grpc_adapter` with the `toni-grpc` crate.
+gRPC is not part of this layer: it is contract-first — services and messages are declared in `.proto` files and known at compile time — which does not fit the pattern-string + payload model. It registers separately via `use_grpc_adapter` with the `ulo-grpc` crate.
 
 ## Message routing
 
@@ -54,8 +54,8 @@ Handlers, payload typing, errors, and enhancers are covered in [RPC Controllers]
 There is no client module to import. A client is one expression — a transport wrapped in an `RpcClient` — registered as an ordinary provider under a string token:
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_tcp::TcpClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_tcp::TcpClientTransport;
 
 #[module(
     providers: [
@@ -90,8 +90,8 @@ impl InventoryService {
 The token is what makes room for more than one: two clients of the same transport, or one transport pointed at two peers, differ only in the string they register under. When the address comes from configuration rather than a literal, register through a factory that takes the dependency it needs:
 
 ```rust
-use toni::{provider_factory, RpcClient};
-use toni_nats::NatsClientTransport;
+use ulo::{provider_factory, RpcClient};
+use ulo_rpc_nats::NatsClientTransport;
 
 provider_factory!("ORDERS_CLIENT", |config: ConfigService<AppConfig>| {
     RpcClient::new(NatsClientTransport::new(config.get_ref().nats_url.clone()))
@@ -110,16 +110,16 @@ Each transport ships as its own crate with a server adapter and a client transpo
 
 | Transport | Crate | Pattern maps to | Request-response via |
 |---|---|---|---|
-| [TCP](/docs/microservices/tcp-adapter) | `toni-tcp` | frame `pattern` field | correlation `id` on a persistent connection |
-| [UDP](/docs/microservices/udp-adapter) | `toni-udp` | datagram `pattern` field | correlation `id`, one datagram per message |
-| [NATS](/docs/microservices/nats-adapter) | `toni-nats` | subject | built-in reply-to inbox |
-| [Redis](/docs/microservices/redis-adapter) | `toni-redis-rpc` | Pub/Sub channel | reply channel carried in a request envelope |
-| [RabbitMQ](/docs/microservices/rabbitmq-adapter) | `toni-rabbitmq` | queue | AMQP `reply_to` + `correlation_id` |
-| [MQTT](/docs/microservices/mqtt-adapter) | `toni-mqtt` | topic | MQTT v5 `response_topic` + `correlation_data` |
-| [Kafka](/docs/microservices/kafka-adapter) | `toni-kafka` | topic | `toni-reply-to` / `toni-correlation-id` headers |
+| [TCP](/docs/microservices/tcp-adapter) | `ulo-rpc-tcp` | frame `pattern` field | correlation `id` on a persistent connection |
+| [UDP](/docs/microservices/udp-adapter) | `ulo-rpc-udp` | datagram `pattern` field | correlation `id`, one datagram per message |
+| [NATS](/docs/microservices/nats-adapter) | `ulo-rpc-nats` | subject | built-in reply-to inbox |
+| [Redis](/docs/microservices/redis-adapter) | `ulo-rpc-redis` | Pub/Sub channel | reply channel carried in a request envelope |
+| [RabbitMQ](/docs/microservices/rabbitmq-adapter) | `ulo-rpc-rabbitmq` | queue | AMQP `reply_to` + `correlation_id` |
+| [MQTT](/docs/microservices/mqtt-adapter) | `ulo-rpc-mqtt` | topic | MQTT v5 `response_topic` + `correlation_data` |
+| [Kafka](/docs/microservices/kafka-adapter) | `ulo-rpc-kafka` | topic | `ulo-reply-to` / `ulo-correlation-id` headers |
 
 TCP and UDP are broker-less — the adapter is the server. The other five require the respective broker to be reachable from both sides.
 
-All seven carry [streaming replies](/docs/microservices/rpc-controllers#streaming-replies) with the same frame grammar. What differs is how a caller says it has walked away: TCP and UDP send a cancel frame in-band on the call's own connection or socket, while the five broker transports publish the notice to a shared channel — `toni.rpc.cancel` on NATS, RabbitMQ and Kafka, `toni:rpc:cancel` on Redis, `toni/rpc/cancel` on MQTT — that every server instance listens to. Each transport page states its own.
+All seven carry [streaming replies](/docs/microservices/rpc-controllers#streaming-replies) with the same frame grammar. What differs is how a caller says it has walked away: TCP and UDP send a cancel frame in-band on the call's own connection or socket, while the five broker transports publish the notice to a shared channel — `ulo.rpc.cancel` on NATS, RabbitMQ and Kafka, `ulo:rpc:cancel` on Redis, `ulo/rpc/cancel` on MQTT — that every server instance listens to. Each transport page states its own.
 
 Instead of binding their own socket, the TCP and UDP adapters can adopt one the caller already bound — `TcpAdapter::from_listener` / `UdpAdapter::from_socket` — for socket activation and zero-downtime restarts; see [Bind targets](/docs/techniques/bind-targets).

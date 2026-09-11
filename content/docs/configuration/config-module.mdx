@@ -1,16 +1,16 @@
 ---
 title: Config Module
-description: Type-safe configuration management with toni-config.
+description: Type-safe configuration management with ulo-config.
 ---
 
-The `toni-config` crate provides structured, type-safe configuration backed by environment variables. Configuration loads eagerly at startup and is injectable anywhere in the DI graph via `ConfigService<T>`.
+The `ulo-config` crate provides structured, type-safe configuration backed by environment variables. Configuration loads eagerly at startup and is injectable anywhere in the DI graph via `ConfigService<T>`.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-config = "0.1"
+ulo = "0.2"
+ulo-config = "0.1"
 ```
 
 ## Defining a configuration struct
@@ -18,12 +18,12 @@ toni-config = "0.1"
 Derive `Config` (plus `Clone`) on a struct with named fields. `#[env("VAR")]` names the environment variable; `#[default(expr)]` supplies a fallback:
 
 ```rust
-use toni_config::Config;
+use ulo_config::Config;
 
 #[derive(Config, Clone)]
 pub struct AppConfig {
     #[env("APP_NAME")]
-    #[default("toni-app".to_string())]
+    #[default("ulo-app".to_string())]
     pub name: String,
 
     #[env("APP_PORT")]
@@ -54,7 +54,7 @@ Without `#[env]`, the field name is uppercased (`log_level` reads `LOG_LEVEL`).
 `ConfigModule<T>` loads (and validates) the configuration when constructed:
 
 ```rust
-use toni_config::{ConfigModule, Environment};
+use ulo_config::{ConfigModule, Environment};
 
 // From the process environment
 let module = ConfigModule::<AppConfig>::from_env()?;
@@ -79,8 +79,8 @@ Import the module in `imports:`. It registers a `ConfigService<T>` provider, inj
 
 ```rust
 use serde_json::json;
-use toni::{controller, get, injectable, module, routes, Body};
-use toni_config::{Config, ConfigModule, ConfigService};
+use ulo::{controller, get, injectable, module, routes, Body};
+use ulo_config::{Config, ConfigModule, ConfigService};
 
 #[injectable]
 pub struct AppService {
@@ -158,12 +158,12 @@ Add the `validator` crate, derive `Validate` alongside `Config`, and mark fields
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni-config = "0.1"
+ulo-config = "0.1"
 validator = { version = "0.20", features = ["derive"] }
 ```
 
 ```rust
-use toni_config::Config;
+use ulo_config::Config;
 use validator::Validate;
 
 #[derive(Config, Validate, Clone)]

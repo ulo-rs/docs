@@ -1,9 +1,9 @@
 ---
-title: toni-macros
-description: Reference for all procedural macros provided by the toni-macros crate.
+title: ulo-macros
+description: Reference for all procedural macros provided by the ulo-macros crate.
 ---
 
-All macros are re-exported through the `toni` crate — no direct `toni-macros` dependency is needed.
+All macros are re-exported through the `ulo` crate — no direct `ulo-macros` dependency is needed.
 
 There are no `#[guard]` / `#[interceptor]` / `#[middleware]` / `#[error_handler]` marker macros. Enhancer roles are detected from the trait impl: declare `#[injectable]`, implement `Guard<C>` / `Interceptor<C, R>` / `ErrorHandler<C, R>` / `Middleware`, list the type in `providers`, and apply it with `#[use_*]` or a factory `use_global_*` call.
 
@@ -24,7 +24,7 @@ There are no `#[guard]` / `#[interceptor]` / `#[middleware]` / `#[error_handler]
 pub struct AppModule;
 ```
 
-All keys are optional. Modules pass directly to the factory: `ToniFactory::create(AppModule).await?`.
+All keys are optional. Modules pass directly to the factory: `UloFactory::create(AppModule).await?`.
 
 The impl form allows two kinds of methods:
 
@@ -35,7 +35,7 @@ The impl form allows two kinds of methods:
 #[module(controllers: [UsersController], providers: [UserService])]
 impl AppModule {
     #[on_module_init]
-    async fn init(&self) -> toni::InitResult { Ok(()) }
+    async fn init(&self) -> ulo::InitResult { Ok(()) }
 }
 ```
 
@@ -132,7 +132,7 @@ async fn find(&self, Path(id): Path<i64>) -> impl IntoResponse { ... }
 
 Handlers take extractors as parameters (`Path`, `Query`, `Json`, `Bytes`, `Body`, `BodyStream`, `Multipart`, `Validated`, or a whole `HttpRequest`) and return any `IntoResponse` type, or `Result<T: IntoResponse, E>` where `E` converts into `HttpError`.
 
-These four are the exported verb macros. `PATCH`/`HEAD`/`OPTIONS` attributes are not currently exported by `toni-macros`.
+These four are the exported verb macros. `PATCH`/`HEAD`/`OPTIONS` attributes are not currently exported by `ulo-macros`.
 
 ### `#[sse]`
 
@@ -210,7 +210,7 @@ async fn shape_rejection(err: &GuardRejection, _ctx: &HttpContext) -> HttpRespon
 #[use_error_handlers(shape_rejection {})]
 ```
 
-The primary error path needs no `#[catch]` — a domain type implementing `toni::Error` renders automatically on every transport. Reach for `#[catch]` to reshape framework events or apply per-route custom rendering.
+The primary error path needs no `#[catch]` — a domain type implementing `ulo::Error` renders automatically on every transport. Reach for `#[catch]` to reshape framework events or apply per-route custom rendering.
 
 ## Lifecycle hook attributes
 
@@ -218,13 +218,13 @@ The primary error path needs no `#[catch]` — a domain type implementing `toni:
 
 | Attribute | Signature | Runs |
 |---|---|---|
-| `#[on_module_init]` | `async fn(&self) -> toni::InitResult` | after the DI container is built |
-| `#[on_application_bootstrap]` | `async fn(&self) -> toni::InitResult` | after all modules init, before serving |
+| `#[on_module_init]` | `async fn(&self) -> ulo::InitResult` | after the DI container is built |
+| `#[on_application_bootstrap]` | `async fn(&self) -> ulo::InitResult` | after all modules init, before serving |
 | `#[on_module_destroy]` | `async fn(&self)` | module teardown during shutdown |
 | `#[before_application_shutdown]` | `async fn(&self, signal: Option<String>)` | before shutdown begins |
 | `#[on_application_shutdown]` | `async fn(&self, signal: Option<String>)` | as the application shuts down |
 
-Returning `Err` from a startup hook aborts startup with `StartupError::HookFailed`, naming the module and hook: `on_module_init` failures surface from `ToniFactory::create`, `on_application_bootstrap` failures from `app.bind()`.
+Returning `Err` from a startup hook aborts startup with `StartupError::HookFailed`, naming the module and hook: `on_module_init` failures surface from `UloFactory::create`, `on_application_bootstrap` failures from `app.bind()`.
 
 ## WebSocket gateway macros
 
@@ -312,7 +312,7 @@ impl OrdersController {
 
 Every parameter is a `FromContext<RpcContext>` extractor, in any order and any subset (including none): `Payload<T>` for the call's message, `RpcData` for it untouched, `Extensions`, `Validated<Payload<T>>`, or an extractor of your own. `&RpcContext` passes through. A type that is none of these fails at the parameter, with a note naming the extractors to reach for.
 
-An `Ok` value that is not `RpcData` is serialised with `RpcData::from_serialize`. Errors may be any `toni::Error` type — `?` lifts one into `RpcError::AppError`.
+An `Ok` value that is not `RpcData` is serialised with `RpcData::from_serialize`. Errors may be any `ulo::Error` type — `?` lifts one into `RpcError::AppError`.
 
 A handler declaring `-> RpcHandlerResult` (or `Result<RpcHandlerOutput, E>`) has its output passed through untouched, which is how it answers with a stream:
 
@@ -350,8 +350,8 @@ impl OrdersService {
 ```
 
 - Each handler is marked `#[grpc_method]`, or `#[grpc_stream]` for a streaming reply. Unmarked items stay as written — the `#[new]` constructor, lifecycle hooks, private helpers.
-- Every parameter is a `FromContext<GrpcContext>`, in any order: `Payload<T>` (the message), `Inbound<T>` (the caller's stream), `toni_grpc::GrpcRequest<T>` (the whole tonic request), `Extensions`, an extractor of your own. `&GrpcContext` passes through. All three request extractors take the request, so two of them in one handler fail to compile naming both.
-- A handler answers with the reply message, with `tonic::Response<T>` to set reply metadata, or with the bare reply and no `Result` where it cannot fail. The error type implements `toni::Error`.
+- Every parameter is a `FromContext<GrpcContext>`, in any order: `Payload<T>` (the message), `Inbound<T>` (the caller's stream), `ulo_grpc::GrpcRequest<T>` (the whole tonic request), `Extensions`, an extractor of your own. `&GrpcContext` passes through. All three request extractors take the request, so two of them in one handler fail to compile naming both.
+- A handler answers with the reply message, with `tonic::Response<T>` to set reply metadata, or with the bare reply and no `Result` where it cannot fail. The error type implements `ulo::Error`.
 - `#[grpc_stream]` reads the trait's associated stream type from the method name — `watch_progress` pairs with `WatchProgressStream`. Where the trait's own naming does not connect the two, name it: `#[grpc_stream(StreamProgressStream)]`.
 - Attribute keys: `server = path::to::OrdersServer` where the tonic wrapper is not the trait's name with `Server` appended, and `shapes = path` where the method markers are not in the module beside the trait.
 - `#[use_*]` and `#[set_metadata]` apply on the impl (every handler) or on one handler.
@@ -360,19 +360,19 @@ What the wire carries comes from the proto, not from the handler, so the build s
 
 ```rust title="build.rs"
 tonic_prost_build::compile_protos("proto/orders.proto")?;
-toni_build::shapes("toni_examples.orders")?;
+ulo_build::shapes("ulo_examples.orders")?;
 ```
 
-`toni_build::shapes` takes the string `tonic::include_proto!` takes and appends one marker type per method, which the macro projects the request type through. A crate writing `#[grpc_methods]` needs `toni-grpc` as a dependency and [`toni-build`](/docs/api-reference/grpc#toni-build) as a build-dependency to compile. The worked form is in the [gRPC quick start](/docs/grpc/quick-start).
+`ulo_build::shapes` takes the string `tonic::include_proto!` takes and appends one marker type per method, which the macro projects the request type through. A crate writing `#[grpc_methods]` needs `ulo-grpc` as a dependency and [`ulo-build`](/docs/api-reference/grpc#ulo-build) as a build-dependency to compile. The worked form is in the [gRPC quick start](/docs/grpc/quick-start).
 
 ## Derive macros
 
-### `#[derive(toni::Error)]`
+### `#[derive(ulo::Error)]`
 
-Derives the `toni::Error` trait. Tag the type — or each enum variant — with `#[error_kind(KIND)]`, where `KIND` is an `ErrorKind` variant: `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `TooManyRequests`, `Timeout`, `Unavailable`, `Unimplemented`, `Internal`. Untagged variants fall back to a top-level `#[error_kind(...)]`, otherwise to `Internal`.
+Derives the `ulo::Error` trait. Tag the type — or each enum variant — with `#[error_kind(KIND)]`, where `KIND` is an `ErrorKind` variant: `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `TooManyRequests`, `Timeout`, `Unavailable`, `Unimplemented`, `Internal`. Untagged variants fall back to a top-level `#[error_kind(...)]`, otherwise to `Internal`.
 
 ```rust
-#[derive(Debug, thiserror::Error, toni::Error)]
+#[derive(Debug, thiserror::Error, ulo::Error)]
 enum BillingError {
     #[error("invoice {0} not found")]
     #[error_kind(NotFound)]
@@ -388,7 +388,7 @@ Handlers returning `Result<T, BillingError>` render the canonical envelope on ev
 
 ### `#[derive(Config)]`
 
-Derives environment-variable loading for a config struct (used with `toni-config`'s `ConfigModule`). Field attributes are separate — `#[env]` and `#[default]` are never combined into one attribute:
+Derives environment-variable loading for a config struct (used with `ulo-config`'s `ConfigModule`). Field attributes are separate — `#[env]` and `#[default]` are never combined into one attribute:
 
 ```rust
 #[derive(Clone, Config)]
@@ -416,7 +416,7 @@ Used inside a module's `providers: [...]` list. Token position accepts a string 
 ### `provider_value!`
 
 ```rust
-provider_value!("APP_NAME", "ToniApp".to_string())
+provider_value!("APP_NAME", "UloApp".to_string())
 provider_value!(Duration, Duration::from_secs(60))              // type-based token
 ```
 

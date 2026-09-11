@@ -1,18 +1,18 @@
 ---
 title: Error Handling
-description: "Domain errors with toni::Error, canonical envelopes, the #[catch] handler chain, framework events, and panic recovery."
+description: "Domain errors with ulo::Error, canonical envelopes, the #[catch] handler chain, framework events, and panic recovery."
 ---
 
-Toni's error story has four layers, from most common to most specialized:
+Ulo's error story has four layers, from most common to most specialized:
 
-1. **Domain errors** — implement `toni::Error` on your own types, return `Result<T, MyError>` from handlers, and the framework renders a canonical response with the right status on every transport.
+1. **Domain errors** — implement `ulo::Error` on your own types, return `Result<T, MyError>` from handlers, and the framework renders a canonical response with the right status on every transport.
 2. **`HttpError`** — a convenience type for trivial cases that don't warrant a dedicated error.
 3. **The error handler chain** — `#[catch(T)]` functions and `ErrorHandler` implementations that reshape specific errors into custom responses. The chain is the only error seam there is: handler errors and the framework's own events both travel it.
 4. **Panic recovery** — `catch_unwind` around every pipeline segment, so a panic becomes a typed event on that same chain instead of tearing down the server.
 
-## Domain errors with `toni::Error`
+## Domain errors with `ulo::Error`
 
-The `toni::Error` trait is `std::error::Error` plus the metadata the pipeline needs:
+The `ulo::Error` trait is `std::error::Error` plus the metadata the pipeline needs:
 
 ```rust
 pub trait Error: std::error::Error + Send + Sync + 'static {
@@ -27,10 +27,10 @@ pub trait Error: std::error::Error + Send + Sync + 'static {
 }
 ```
 
-Derive it with `#[derive(toni::Error)]` and tag variants with `#[error_kind(KIND)]`:
+Derive it with `#[derive(ulo::Error)]` and tag variants with `#[error_kind(KIND)]`:
 
 ```rust
-#[derive(Debug, toni::Error)]
+#[derive(Debug, ulo::Error)]
 enum UserError {
     #[error_kind(NotFound)]
     NotFound(String),
@@ -79,7 +79,7 @@ The variant name (`"NotFound"`) is the stable `kind` identifier used in RPC and 
 
 ## Returning errors from handlers
 
-Handlers return `Result<T, MyError>`. A blanket `From<E: toni::Error>` impl lifts the error into the transport's handler error type (`HttpError`, `RpcError`, `WsError`), so `?` works on any `toni::Error`:
+Handlers return `Result<T, MyError>`. A blanket `From<E: ulo::Error>` impl lifts the error into the transport's handler error type (`HttpError`, `RpcError`, `WsError`), so `?` works on any `ulo::Error`:
 
 ```rust
 #[injectable]
@@ -123,7 +123,7 @@ When `details()` returns `Some(value)`, it is merged into the body under a `deta
 For one-off cases, `HttpError` skips the dedicated type:
 
 ```rust
-use toni::errors::HttpError;
+use ulo::errors::HttpError;
 
 #[get("/-/teapot")]
 fn teapot(&self) -> Result<Body, HttpError> {
@@ -150,9 +150,9 @@ When the canonical envelope isn't enough — extra headers, a domain-specific bo
 
 ```rust
 use serde_json::json;
-use toni::{catch, Error, ErrorKind};
-use toni::context::HttpContext;
-use toni::HttpResponse;
+use ulo::{catch, Error, ErrorKind};
+use ulo::context::HttpContext;
+use ulo::HttpResponse;
 
 #[derive(Debug)]
 struct PaymentDeclined {
@@ -175,7 +175,7 @@ impl Error for PaymentDeclined {
 #[catch(PaymentDeclined)]
 async fn render_payment_declined(err: &PaymentDeclined, _ctx: &HttpContext) -> HttpResponse {
     HttpResponse::builder()
-        .status(toni::errors::http_status(err.kind()))
+        .status(ulo::errors::http_status(err.kind()))
         .header("Retry-After", err.retry_after_secs.to_string())
         .json(json!({
             "type": "payment_declined",
@@ -209,7 +209,7 @@ The context parameter picks the transport, and the return type follows from it: 
 `#[catch]` is sugar for the underlying trait:
 
 ```rust
-use toni::traits_helpers::{ChainError, ErrorHandler};
+use ulo::traits_helpers::{ChainError, ErrorHandler};
 
 #[async_trait]
 pub trait ErrorHandler<C: ?Sized + HandlerContext, R>: Send + Sync {
@@ -222,9 +222,9 @@ pub trait ErrorHandler<C: ?Sized + HandlerContext, R>: Send + Sync {
 Implementing the trait directly suits handlers that match on more than one type:
 
 ```rust
-use toni::HttpResponse;
-use toni::context::HttpContext;
-use toni::errors::HttpError;
+use ulo::HttpResponse;
+use ulo::context::HttpContext;
+use ulo::errors::HttpError;
 
 pub struct StatusPageErrorHandler;
 
@@ -247,7 +247,7 @@ impl ErrorHandler<HttpContext, HttpResponse> for StatusPageErrorHandler {
 
 ### Order and registration
 
-Handlers are consulted most-specific first: **method → controller → global**. The first `Some` claims the error; if all return `None`, the transport's default rendering applies (the canonical envelope for `toni::Error` / `HttpError` values, a 500 envelope for unknown errors).
+Handlers are consulted most-specific first: **method → controller → global**. The first `Some` claims the error; if all return `None`, the transport's default rendering applies (the canonical envelope for `ulo::Error` / `HttpError` values, a 500 envelope for unknown errors).
 
 - Method level: `#[use_error_handlers(...)]` on a handler
 - Controller level: `#[use_error_handlers(...)]` on the `#[routes]` / `#[patterns]` / `#[subscriptions]` / `#[grpc_methods]` impl
@@ -264,14 +264,14 @@ The chain dispatches on handler-returned errors and framework events alike. For 
 <FromNest>
 `#[catch(T)]` is the exception filter and `use_global_http_error_handler` is
 `useGlobalFilters`, but the two sit at opposite ends of the workflow. In NestJS a
-filter is where an error becomes a response, so most projects have one. In Toni a
-`#[derive(toni::Error)]` type already renders itself through its `ErrorKind`, and
+filter is where an error becomes a response, so most projects have one. In Ulo a
+`#[derive(ulo::Error)]` type already renders itself through its `ErrorKind`, and
 a handler is the override for the cases where that rendering is wrong.
 </FromNest>
 
 ## Framework events
 
-When the framework itself is the source of an error, it raises a typed event implementing `toni::Error`. Events travel the error handler chain alongside handler errors, so `#[catch]` handlers reshape them the same way:
+When the framework itself is the source of an error, it raises a typed event implementing `ulo::Error`. Events travel the error handler chain alongside handler errors, so `#[catch]` handlers reshape them the same way:
 
 | Event | `kind` | Raised when | Transports |
 |---|---|---|---|
@@ -280,13 +280,13 @@ When the framework itself is the source of an error, it raises a typed event imp
 | `MiddlewareFailure` | `Internal` (500) | Middleware returned `Err` before the handler ran. | HTTP, route-scoped middleware only. |
 | `PanicRecovered` | `Internal` (500) | A panic was caught in the pipeline. Carries the `PipelineSegment` it happened in. | All four. |
 
-All four are exported from `toni::errors`; the crate root re-exports every one but `Unrouted`. Reshaping a guard rejection:
+All four are exported from `ulo::errors`; the crate root re-exports every one but `Unrouted`. Reshaping a guard rejection:
 
 ```rust
-#[catch(toni::errors::GuardRejection)]
-async fn auth_failure(err: &toni::errors::GuardRejection, _ctx: &HttpContext) -> HttpResponse {
+#[catch(ulo::errors::GuardRejection)]
+async fn auth_failure(err: &ulo::errors::GuardRejection, _ctx: &HttpContext) -> HttpResponse {
     HttpResponse::builder()
-        .status(toni::errors::http_status(err.kind()))
+        .status(ulo::errors::http_status(err.kind()))
         .json(json!({
             "error": "auth_required",
             "hint": "Send `x-auth-token: <token>`",
@@ -302,10 +302,10 @@ A handler that returns `None` sees the error and changes nothing — the renderi
 
 ```rust
 use std::sync::Arc;
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::traits_helpers::{ChainError, ErrorHandler};
-use toni::HttpResponse;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::traits_helpers::{ChainError, ErrorHandler};
+use ulo::HttpResponse;
 
 pub struct ErrorLogger;
 
@@ -334,7 +334,7 @@ Publish the error onto a transport the app already speaks, and do the observing 
 
 ```rust
 use serde_json::json;
-use toni::RpcClient;
+use ulo::RpcClient;
 
 struct ErrorReporter {
     client: RpcClient,
@@ -363,7 +363,7 @@ impl ErrorHandler<HttpContext, HttpResponse> for ErrorReporter {
 The consumer is an ordinary `#[event_pattern]` handler, and nothing waits on it:
 
 ```rust
-use toni::extractors::Payload;
+use ulo::extractors::Payload;
 
 #[controller]
 pub struct ErrorConsumer {}
@@ -413,4 +413,4 @@ The same model runs everywhere; only the wire shape differs:
 
 - **RPC** — handlers return `Result<RpcData, RpcError>` or `Result<T, MyError>`; `RpcError::AppError` wraps lifted domain errors and renders `{"status": "error", "kind": "NotFound", "message": "..."}` as the reply payload. Chain handlers are `ErrorHandler<RpcContext, RpcData>`. A handler that answers with a sequence returns `RpcHandlerResult` instead, and an `Err` item ends the stream — see [RPC Controllers](/docs/microservices/rpc-controllers).
 - **WebSocket** — `WsError::AppError` plays the same role; chain handlers are `ErrorHandler<WsContext, WsMessage>` and produce the message sent back to the client.
-- **gRPC** — a `#[grpc_methods]` handler returns its own error implementing `toni::Error`, or a `GrpcStatus` to name a code outside the eleven kinds. The error travels in `tonic::Status`'s source slot, so `#[catch(MyError)]` matches here as it does everywhere else. Chain handlers are `ErrorHandler<GrpcContext, GrpcStatus>` and can remap a status before it reaches the wire; gRPC registers per-method and per-service handlers via the same `#[use_error_handlers]` attribute on `#[grpc_methods]` impls.
+- **gRPC** — a `#[grpc_methods]` handler returns its own error implementing `ulo::Error`, or a `GrpcStatus` to name a code outside the eleven kinds. The error travels in `tonic::Status`'s source slot, so `#[catch(MyError)]` matches here as it does everywhere else. Chain handlers are `ErrorHandler<GrpcContext, GrpcStatus>` and can remap a status before it reaches the wire; gRPC registers per-method and per-service handlers via the same `#[use_error_handlers]` attribute on `#[grpc_methods]` impls.

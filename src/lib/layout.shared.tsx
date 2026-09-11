@@ -5,10 +5,10 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <span className="font-semibold tracking-tight">
-          <span className="text-brand">toni</span>
+          <span className="text-brand">ulo</span>
         </span>
       ),
     },
-    githubUrl: "https://github.com/ifeanyi-ugwu/toni-rs",
+    githubUrl: "https://github.com/ulo-rs/ulo",
   };
 }

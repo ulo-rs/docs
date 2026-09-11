@@ -1,20 +1,20 @@
 ---
 title: Integration Testing
-description: Test complete Toni applications end-to-end using the application context and HTTP test clients.
+description: Test complete Ulo applications end-to-end using the application context and HTTP test clients.
 ---
 
 Integration tests exercise the full application — modules, DI, lifecycle hooks, and HTTP routing — without mocking internal boundaries.
 
 ## Testing with the application context
 
-`ToniFactory::create_application_context` creates a full DI-initialized context without starting an HTTP server. Use it to test service interactions end-to-end:
+`UloFactory::create_application_context` creates a full DI-initialized context without starting an HTTP server. Use it to test service interactions end-to-end:
 
 ```rust
-use toni::ToniFactory;
+use ulo::UloFactory;
 
 #[tokio::test]
 async fn test_user_creation_flow() {
-    let mut ctx = ToniFactory::create_application_context(AppModule).await.unwrap();
+    let mut ctx = UloFactory::create_application_context(AppModule).await.unwrap();
 
     let users_service = ctx.get::<UsersService>().await.unwrap();
     let orders_service = ctx.get::<OrdersService>().await.unwrap();
@@ -54,8 +54,8 @@ A harness that wants to own the socket can also bind a `std::net::TcpListener` i
 ```rust
 use std::net::SocketAddr;
 
-use toni::{ModuleMetadata, ShutdownHandle, ToniFactory};
-use toni_axum::AxumAdapter;
+use ulo::{ModuleMetadata, ShutdownHandle, UloFactory};
+use ulo_http_axum::AxumAdapter;
 
 /// Spawns the app on the current LocalSet; returns its base URL and a
 /// handle for graceful teardown. Call from inside a LocalSet.
@@ -64,7 +64,7 @@ async fn start_server(module: impl ModuleMetadata + 'static) -> (String, Shutdow
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<ShutdownHandle>();
 
     tokio::task::spawn_local(async move {
-        let mut app = ToniFactory::create(module).await.unwrap();
+        let mut app = UloFactory::create(module).await.unwrap();
         app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 0)).unwrap();
 
         let bound = app.bind().await.unwrap();
@@ -142,7 +142,7 @@ Adapters are distinct types, so a suite that must hold on all of them takes the 
 ```rust
 async fn start_server(
     module: impl ModuleMetadata + 'static,
-    adapter: impl toni::HttpAdapter + 'static,
+    adapter: impl ulo::HttpAdapter + 'static,
 ) -> (String, ShutdownHandle) {
     // as above, with `adapter` in place of `AxumAdapter::new()`
 }
@@ -170,8 +170,8 @@ macro_rules! suite {
     };
 }
 
-suite!(axum, toni_axum::AxumAdapter::new());
-suite!(poem, toni_poem::PoemAdapter::new());
+suite!(axum, ulo_http_axum::AxumAdapter::new());
+suite!(poem, ulo_http_poem::PoemAdapter::new());
 ```
 
 This is how the framework's own conformance suite is written: behaviour that must be identical across adapters — the global middleware chain, unrouted paths, method mismatches — is written once and run against every adapter.
@@ -181,8 +181,8 @@ This is how the framework's own conformance suite is written: behaviour that mus
 The other transports take the same shape: register the adapter on port `0`, `bind()`, and read the address off `BoundAdapters` before calling `run()`.
 
 ```rust
-let mut app = ToniFactory::create(TestModule).await.unwrap();
-app.use_rpc_adapter(toni_tcp::TcpAdapter::new("127.0.0.1", 0)).unwrap();
+let mut app = UloFactory::create(TestModule).await.unwrap();
+app.use_rpc_adapter(ulo_rpc_tcp::TcpAdapter::new("127.0.0.1", 0)).unwrap();
 
 let bound = app.bind().await.unwrap();
 let addr = bound.rpc.expect("RPC adapter not bound");
@@ -228,11 +228,11 @@ Lifecycle hooks run normally in integration tests. If `on_module_init` makes rea
 Startup failures are returned values, not process exits, so a test can assert on them directly:
 
 ```rust
-use toni::{StartupError, ToniFactory};
+use ulo::{StartupError, UloFactory};
 
 #[tokio::test]
 async fn failing_init_hook_surfaces_from_create() {
-    let result = ToniFactory::create(BadModule).await;
+    let result = UloFactory::create(BadModule).await;
 
     assert!(matches!(result, Err(StartupError::HookFailed { .. })));
 }
@@ -245,8 +245,8 @@ A socket that cannot be acquired is the other half, and it surfaces from `bind()
 ```rust
 use std::net::TcpListener;
 
-use toni::{StartupError, ToniFactory};
-use toni_tcp::TcpAdapter;
+use ulo::{StartupError, UloFactory};
+use ulo_rpc_tcp::TcpAdapter;
 
 #[tokio::test]
 async fn a_taken_rpc_port_fails_bind() {
@@ -256,7 +256,7 @@ async fn a_taken_rpc_port_fails_bind() {
             let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
             let taken = occupied.local_addr().unwrap().port();
 
-            let mut app = ToniFactory::create(RpcModule).await.unwrap();
+            let mut app = UloFactory::create(RpcModule).await.unwrap();
             app.use_rpc_adapter(TcpAdapter::new("127.0.0.1", taken)).unwrap();
 
             let err = app.bind().await.expect_err("a taken port must fail bind");

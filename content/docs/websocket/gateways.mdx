@@ -1,21 +1,21 @@
 ---
 title: WebSocket Gateways
-description: Building real-time WebSocket handlers with Toni's gateway system.
+description: Building real-time WebSocket handlers with Ulo's gateway system.
 ---
 
-WebSocket connections in Toni are handled through **gateways** — structs annotated with `#[websocket_gateway]` that handle connection lifecycle events and messages. Gateways live in the DI container like any other provider, so they have full access to injected services.
+WebSocket connections in Ulo are handled through **gateways** — structs annotated with `#[websocket_gateway]` that handle connection lifecycle events and messages. Gateways live in the DI container like any other provider, so they have full access to injected services.
 
 ## Enabling WebSocket support
 
-WebSocket routes share the same port as HTTP by default. Register your HTTP adapter and Toni wires WebSocket upgrade routes onto it automatically:
+WebSocket routes share the same port as HTTP by default. Register your HTTP adapter and Ulo wires WebSocket upgrade routes onto it automatically:
 
 ```rust
-use toni::ToniFactory;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 8080)).unwrap();
     app.start().await?;
     Ok(())
@@ -29,8 +29,8 @@ No separate WebSocket adapter is needed for the common case. To run a gateway on
 `#[websocket_gateway("/path")]` goes on the struct — exactly like `#[injectable]`. Message handlers live in a sibling impl marked `#[subscriptions]`, with `#[new]` marking the constructor:
 
 ```rust
-use toni::*;
-use toni::{module, new, subscriptions, websocket_gateway};
+use ulo::*;
+use ulo::{module, new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct EchoGateway {}
@@ -63,7 +63,7 @@ impl EchoGateway {
 struct AppModule;
 ```
 
-Attribute arguments: a path string (defaults to `"/"`), `namespace = "…"`, and `port = N`. The gateway is registered by listing it in a module's `providers` — Toni discovers it and binds the route at `app.bind()`.
+Attribute arguments: a path string (defaults to `"/"`), `namespace = "…"`, and `port = N`. The gateway is registered by listing it in a module's `providers` — Ulo discovers it and binds the route at `app.bind()`.
 
 ## Message routing
 
@@ -101,7 +101,7 @@ A `#[subscribe_message]` handler takes whatever parameters it needs — each one
 
 The `(client: WsClient, message: WsMessage)` pair used above is the common case, not a required shape. Any type of your own implementing `FromContext<WsContext>` is a parameter too. Parameter names carry no meaning here: `&WsContext` is recognised by its shape, and every other parameter means what its type means.
 
-`Payload<T>` (from `toni::extractors`) parses text frames with `serde_json::from_str` and binary frames with `from_slice`. It deserializes the **whole frame**, not a `data` sub-object — `ChatInput` below matches because `data` is a top-level field of the frame, and the routing field is ignored as an unknown one:
+`Payload<T>` (from `ulo::extractors`) parses text frames with `serde_json::from_str` and binary frames with `from_slice`. It deserializes the **whole frame**, not a `data` sub-object — `ChatInput` below matches because `data` is a top-level field of the frame, and the routing field is ignored as an unknown one:
 
 ```rust
 #[derive(serde::Deserialize)]
@@ -118,7 +118,7 @@ async fn handle_message(&self, Payload(input): Payload<ChatInput>) -> WsHandlerR
 `Validated<Payload<T>>` runs `T`'s `validator` attributes after parsing and refuses the frame when they fail:
 
 ```rust
-use toni::extractors::{Payload, Validated};
+use ulo::extractors::{Payload, Validated};
 use validator::Validate;
 
 #[derive(serde::Deserialize, Validate)]
@@ -155,7 +155,7 @@ Handlers that push through [broadcasting](/docs/websocket/broadcasting) instead 
 
 ```rust
 use futures::stream;
-use toni::websocket::{WsHandlerOutput, WsHandlerResult, WsMessage};
+use ulo::websocket::{WsHandlerOutput, WsHandlerResult, WsMessage};
 
 #[subscribe_message("count")]
 async fn on_count(&self) -> WsHandlerResult {
@@ -177,8 +177,8 @@ A stream dropped before it drains — the client went away — cancels the execu
 `#[on_connect]`, `#[on_disconnect]`, and `#[after_init]` are standalone per-method macros — they go in a plain impl block and need no `#[subscriptions]`:
 
 ```rust
-use toni::websocket::{WsClient, WsError};
-use toni::{after_init, on_connect, on_disconnect, websocket_gateway};
+use ulo::websocket::{WsClient, WsError};
+use ulo::{after_init, on_connect, on_disconnect, websocket_gateway};
 
 #[websocket_gateway("/presence")]
 pub struct PresenceGateway {}
@@ -228,7 +228,7 @@ RFC 6455 defines no auth-specific code, which is why an unauthorized connect als
 For a subprotocol that defines its own refusal codes, the envelope is noise the client has no grammar for. `WsError::Refused` closes with the code you name and sends nothing before it — graphql-ws, for instance, closes with 4406 when the requested subprotocol is unacceptable:
 
 ```rust
-use toni::websocket::{WsClient, WsError};
+use ulo::websocket::{WsClient, WsError};
 
 #[on_connect]
 async fn connected(&self, client: &WsClient) -> Result<(), WsError> {
@@ -261,7 +261,7 @@ Header keys are stored lowercase, so look up `"x-auth-token"` regardless of how 
 
 ## Session
 
-`Session` (`toni::websocket::Session`, also at the crate root) is the store scoped to a connection. It is created with the client before connect guards run and dropped when the client is removed — a value written at connect is readable by every later message on that connection, and a reconnect starts empty. It is a store, not a context: values and a lifetime, nothing more.
+`Session` (`ulo::websocket::Session`, also at the crate root) is the store scoped to a connection. It is created with the client before connect guards run and dropped when the client is removed — a value written at connect is readable by every later message on that connection, and a reconnect starts empty. It is a store, not a context: values and a lifetime, nothing more.
 
 ```rust
 session.insert(value)          // store T for the rest of the connection; returns what it replaced
@@ -319,7 +319,7 @@ message.as_text()    // Option<&str>
 message.as_binary()  // Option<&[u8]>
 ```
 
-`CloseFrame { code: u16, reason: String }` lives at `toni::websocket::CloseFrame`. RFC 6455 caps a close payload at 125 bytes, two of which are the code, so `close_with` truncates the reason to 123 bytes on a character boundary rather than building a frame the peer rejects.
+`CloseFrame { code: u16, reason: String }` lives at `ulo::websocket::CloseFrame`. RFC 6455 caps a close payload at 125 bytes, two of which are the code, so `close_with` truncates the reason to 123 bytes on a character boundary rather than building a frame the peer rejects.
 
 ## Error handling
 
@@ -341,7 +341,7 @@ The `kind` per variant:
 | `Refused { code, reason }` | `BadRequest` — but a refused *connect* sends no envelope at all, only the close (see [Refusing a connection](#refusing-a-connection)) |
 | `AppError(err)` | the wrapped error's own kind |
 
-Domain error types implementing `toni::Error` (via `#[derive(toni::Error)]` + `#[error_kind(KIND)]`) lift into `WsError::AppError` automatically through `?` — the envelope then carries the error's own `kind`, `message`, and optional `details`:
+Domain error types implementing `ulo::Error` (via `#[derive(ulo::Error)]` + `#[error_kind(KIND)]`) lift into `WsError::AppError` automatically through `?` — the envelope then carries the error's own `kind`, `message`, and optional `details`:
 
 ```rust
 #[subscribe_message("create")]
@@ -376,10 +376,10 @@ Three of the framework's own events reach the error chain while a message is bei
 `#[catch(T)]` lowers a free async function into a handler for one of them. Note the return type: the WebSocket chain answers with a bare `WsMessage`, not the `WsHandlerResult` a handler returns.
 
 ```rust
-use toni::context::WsContext;
-use toni::errors::Unrouted;
-use toni::websocket::WsMessage;
-use toni::catch;
+use ulo::context::WsContext;
+use ulo::errors::Unrouted;
+use ulo::websocket::WsMessage;
+use ulo::catch;
 
 #[catch(Unrouted)]
 async fn unknown_event(err: &Unrouted, _ctx: &WsContext) -> WsMessage {
@@ -387,7 +387,7 @@ async fn unknown_event(err: &Unrouted, _ctx: &WsContext) -> WsMessage {
 }
 ```
 
-All three types live in `toni::errors`. `GuardRejection` and `PanicRecovered` are re-exported at the crate root as well; `Unrouted` is not, so import it by its full path. Register the handler on the factory with `factory.use_global_ws_error_handler(Arc::new(unknown_event))`. For a handler scoped to one gateway or one event, write an `#[injectable]` provider implementing `ErrorHandler<WsContext, WsMessage>` and name it in `#[use_error_handlers]` — see [WebSocket + DI](/docs/websocket/with-di#error-handlers-on-gateways).
+All three types live in `ulo::errors`. `GuardRejection` and `PanicRecovered` are re-exported at the crate root as well; `Unrouted` is not, so import it by its full path. Register the handler on the factory with `factory.use_global_ws_error_handler(Arc::new(unknown_event))`. For a handler scoped to one gateway or one event, write an `#[injectable]` provider implementing `ErrorHandler<WsContext, WsMessage>` and name it in `#[use_error_handlers]` — see [WebSocket + DI](/docs/websocket/with-di#error-handlers-on-gateways).
 
 ## Namespaces
 

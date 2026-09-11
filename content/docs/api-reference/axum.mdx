@@ -1,20 +1,20 @@
 ---
-title: toni-axum
+title: ulo-http-axum
 description: API reference for the Axum adapter crate.
 ---
 
 ## AxumAdapter
 
 ```rust
-use toni_axum::AxumAdapter;
+use ulo_http_axum::AxumAdapter;
 
 AxumAdapter::new() -> AxumAdapter
 ```
 
-Pass to `app.use_http_adapter` after `ToniFactory::create`:
+Pass to `app.use_http_adapter` after `UloFactory::create`:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await.unwrap();
 ```
@@ -28,7 +28,7 @@ The second argument is a [`BindTarget`](/docs/techniques/bind-targets): an addre
 If you need WebSocket on a different port than HTTP, register a second `AxumAdapter` as the WebSocket adapter. It is only consulted for gateways that declare `port = N`:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000)).unwrap();
 app.use_websocket_adapter(AxumAdapter::new()).unwrap();
 app.start().await.unwrap();
@@ -46,7 +46,7 @@ pub struct ChatGateway;
 The crate's second export: the `WsSink` a connection's outbound half is written through, wrapping a `tokio::sync::mpsc::Sender<WsMessage>`.
 
 ```rust
-use toni_axum::TokioSender;
+use ulo_http_axum::TokioSender;
 
 TokioSender::new(sender: mpsc::Sender<WsMessage>) -> TokioSender
 sender.inner() -> &mpsc::Sender<WsMessage>

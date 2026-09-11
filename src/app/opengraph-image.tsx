@@ -4,7 +4,7 @@ import { ImageResponse } from "next/og";
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
-export const alt = "Toni — structure for Rust services";
+export const alt = "Ulo — structure for Rust services";
 
 const INK = "#0b0e0e";
 const BRAND = "#4fc8bd";
@@ -34,7 +34,7 @@ export default function OpengraphImage() {
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <img width="44" height="44" src={MARK} alt="" />
           <div style={{ display: "flex", fontSize: 34, color: FG, fontWeight: 600 }}>
-            toni
+            ulo
           </div>
         </div>
 

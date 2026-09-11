@@ -1,9 +1,9 @@
 ---
 title: Environment Variables
-description: Reading and managing environment variables in Toni applications.
+description: Reading and managing environment variables in Ulo applications.
 ---
 
-Toni applications read configuration from environment variables. The `toni-config` crate automates this with typed structs (see [Config Module](/docs/configuration/config-module)), but you can also access environment variables directly.
+Ulo applications read configuration from environment variables. The `ulo-config` crate automates this with typed structs (see [Config Module](/docs/configuration/config-module)), but you can also access environment variables directly.
 
 ## Direct access
 
@@ -21,16 +21,16 @@ let port: u16 = env::var("PORT")
 
 ## Loading .env files
 
-`toni-config` loads `.env` files itself — no extra dependency or feature flag:
+`ulo-config` loads `.env` files itself — no extra dependency or feature flag:
 
 ```rust
-use toni_config::ConfigModule;
+use ulo_config::ConfigModule;
 
 // Loads .env into the process environment, then reads the config from it
 let module = ConfigModule::<AppConfig>::from_file(".env")?;
 ```
 
-For direct `std::env` access outside `toni-config`, the `dotenv` crate works as usual:
+For direct `std::env` access outside `ulo-config`, the `dotenv` crate works as usual:
 
 ```toml title="Cargo.toml"
 [dependencies]
@@ -69,7 +69,7 @@ DATABASE_URL=postgresql://prod-server/myapp
 `ConfigModule::from_env_file` picks the file from an `Environment` value:
 
 ```rust
-use toni_config::{ConfigModule, Environment};
+use ulo_config::{ConfigModule, Environment};
 
 // Loads .env.development, .env.production, or .env.test
 let module = ConfigModule::<AppConfig>::from_env_file(Environment::current())?;

@@ -1,6 +1,6 @@
 ---
 title: Services & Providers
-description: Injectable services are the building blocks of Toni's business logic layer.
+description: Injectable services are the building blocks of Ulo's business logic layer.
 ---
 
 A **provider** is anything the DI container manages: a service struct, a configuration value, a database connection, a factory-created object. The most common form is a **service** — a struct that holds business logic and can be injected into controllers and other services.
@@ -8,7 +8,7 @@ A **provider** is anything the DI container manages: a service struct, a configu
 ## Defining a service
 
 ```rust
-use toni::injectable;
+use ulo::injectable;
 
 #[injectable]
 pub struct UsersService {
@@ -113,7 +113,7 @@ pub struct OrdersModule;
 
 ## Async initialization
 
-Use the `#[on_module_init]` lifecycle hook to run async setup after the service is constructed but before the application starts accepting requests. Startup hooks are `async fn` returning `toni::InitResult`; returning `Err` aborts startup:
+Use the `#[on_module_init]` lifecycle hook to run async setup after the service is constructed but before the application starts accepting requests. Startup hooks are `async fn` returning `ulo::InitResult`; returning `Err` aborts startup:
 
 ```rust
 #[injectable]
@@ -124,7 +124,7 @@ pub struct DatabaseService {
 
 impl DatabaseService {
     #[on_module_init]
-    async fn connect(&self) -> toni::InitResult {
+    async fn connect(&self) -> ulo::InitResult {
         // runs once, after all providers in this module are instantiated
         println!("Connecting to {}", self.name);
         Ok(())
@@ -157,7 +157,7 @@ A singleton dispatch target — an HTTP controller, an RPC controller, or a gRPC
 An enhancer is a provider that implements the role trait — the trait impl *is* the declaration. There are no marker attributes: declare `#[injectable]`, implement `Guard<HttpContext>` (or `Interceptor`, `ErrorHandler`, `Middleware`), register in `providers`, and apply with `#[use_guards]`. `Interceptor` and `ErrorHandler` also carry the transport's answer type — `Interceptor<HttpContext, HttpResponse>` for HTTP:
 
 ```rust
-use toni::{async_trait, injectable, context::HttpContext, traits_helpers::Guard};
+use ulo::{async_trait, injectable, context::HttpContext, traits_helpers::Guard};
 
 #[injectable]
 pub struct AdminGuard {

@@ -3,7 +3,7 @@ title: Database
 description: Six integrations, each registering a connection handle you inject by type.
 ---
 
-Every integration follows the same shape: call the integration's root constructor once in the root module — `for_root`, or the database-specific constructor for SQLx and Diesel — then inject the driver's own handle: `DatabaseConnection`, `Pool<Postgres>`, `Database`. Toni does not wrap the driver, so the query API is the one the driver's own documentation describes.
+Every integration follows the same shape: call the integration's root constructor once in the root module — `for_root`, or the database-specific constructor for SQLx and Diesel — then inject the driver's own handle: `DatabaseConnection`, `Pool<Postgres>`, `Database`. Ulo does not wrap the driver, so the query API is the one the driver's own documentation describes.
 
 A DI token is the handle's fully-qualified type name, not the spelling in your `use` statement. `PgPool`, `Pool<Postgres>` and `sqlx::Pool<sqlx::Postgres>` are one token, so an alias or a qualified path reaches the same connection.
 

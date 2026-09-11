@@ -1,5 +1,5 @@
 ---
-title: toni-config
+title: ulo-config
 description: API reference for the configuration management crate.
 ---
 
@@ -8,7 +8,7 @@ description: API reference for the configuration management crate.
 `#[env]` and `#[default]` are separate attributes, one per line. A field with `#[default]` falls back to the given expression when the env var is unset; a field without it is required and fails loading when missing. Fields without `#[env]` read the SCREAMING_SNAKE_CASE of the field name.
 
 ```rust
-use toni_config::Config;
+use ulo_config::Config;
 
 #[derive(Config, Clone)]
 pub struct AppConfig {
@@ -128,12 +128,12 @@ Opt-in per field via the `validator` crate — there is no Cargo feature. Derive
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni-config = "0.1"
+ulo-config = "0.1"
 validator = { version = "0.20", features = ["derive"] }
 ```
 
 ```rust
-use toni_config::Config;
+use ulo_config::Config;
 use validator::Validate;
 
 #[derive(Config, Validate, Clone)]

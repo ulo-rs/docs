@@ -1,52 +1,52 @@
 ---
 title: Rocket Adapter
-description: Using the toni-rocket adapter — setup, same-port WebSocket via rocket_ws, buffered request bodies, and graceful shutdown.
+description: Using the ulo-http-rocket adapter — setup, same-port WebSocket via rocket_ws, buffered request bodies, and graceful shutdown.
 ---
 
-The `toni-rocket` crate wraps [Rocket](https://crates.io/crates/rocket) 0.5 to handle HTTP for Toni applications, with same-port WebSocket upgrades via [`rocket_ws`](https://crates.io/crates/rocket_ws) 0.1. Request bodies are buffered (32 MiB cap); response bodies stream.
+The `ulo-http-rocket` crate wraps [Rocket](https://crates.io/crates/rocket) 0.5 to handle HTTP for Ulo applications, with same-port WebSocket upgrades via [`rocket_ws`](https://crates.io/crates/rocket_ws) 0.1. Request bodies are buffered (32 MiB cap); response bodies stream.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-rocket = "0.1"
+ulo = "0.2"
+ulo-http-rocket = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ## Basic setup
 
 ```rust
-use toni::*;
-use toni_rocket::RocketAdapter;
+use ulo::*;
+use ulo_http_rocket::RocketAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(RocketAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await?;
     Ok(())
 }
 ```
 
-Routes are not translated into Rocket's `<param>` syntax. The adapter mounts one catch-all Rocket route per method at `/<__toni_chain..>` and dispatches through an internal matcher that understands Toni's `{param}` syntax itself, along with `:param` and `*tail` for callers of the raw adapter SPI. Unmatched paths get Toni's standard 404 envelope, and the global middleware chain observes every request.
+Routes are not translated into Rocket's `<param>` syntax. The adapter mounts one catch-all Rocket route per method at `/<__ulo_chain..>` and dispatches through an internal matcher that understands Ulo's `{param}` syntax itself, along with `:param` and `*tail` for callers of the raw adapter SPI. Unmatched paths get Ulo's standard 404 envelope, and the global middleware chain observes every request.
 
 ## WebSocket support
 
 Same-port gateways (`#[websocket_gateway("/path")]`) upgrade through `rocket_ws` on the HTTP listener; the routes are mounted as `GET`, matching RFC 6455.
 
-No sub-protocol is negotiated: the handshake reply carries `Sec-WebSocket-Accept` and nothing else. `toni-axum`, `toni-salvo`, and `toni-poem` each echo back the first protocol the client offered. A client that requires the server to select one — a `graphql-transport-ws` client does — refuses the connection on this adapter.
+No sub-protocol is negotiated: the handshake reply carries `Sec-WebSocket-Accept` and nothing else. `ulo-http-axum`, `ulo-http-salvo`, and `ulo-http-poem` each echo back the first protocol the client offered. A client that requires the server to select one — a `graphql-transport-ws` client does — refuses the connection on this adapter.
 
-The adapter does **not** implement `WebSocketAdapter`, so separate-port gateways (`#[websocket_gateway("/path", port = N)]`) fail registration. Pair `toni-rocket` with a dedicated separate-port adapter ([`toni-tungstenite`](/docs/websocket/separate-port)) when you need one.
+The adapter does **not** implement `WebSocketAdapter`, so separate-port gateways (`#[websocket_gateway("/path", port = N)]`) fail registration. Pair `ulo-http-rocket` with a dedicated separate-port adapter ([`ulo-ws-tungstenite`](/docs/websocket/separate-port)) when you need one.
 
 ## Body behavior
 
-- **Requests are buffered**, capped at 32 MiB. Rocket's `Data<'r>` is lifetime-bound to the request and cannot outlive the handler, so the adapter reads the full body into memory before handing it to Toni. The `BodyStream` extractor still works — it sees the payload as a single chunk.
+- **Requests are buffered**, capped at 32 MiB. Rocket's `Data<'r>` is lifetime-bound to the request and cannot outlive the handler, so the adapter reads the full body into memory before handing it to Ulo. The `BodyStream` extractor still works — it sees the payload as a single chunk.
 - **Responses stream.** `Body::stream(...)` is bridged into Rocket's `streamed_body`, so chunks reach the client incrementally — [SSE](/docs/techniques/sse) works. Buffered bodies are sent with an accurate `Content-Length` instead of chunked transfer.
 
 ## Graceful shutdown
 
-The adapter forwards Toni's shutdown signal to Rocket's `Shutdown::notify()`; the launch future resolves once Rocket has drained in-flight connections. Rocket's own Ctrl-C handling is disabled (`shutdown.ctrlc = false`), so signal wiring goes through the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) like every other adapter.
+The adapter forwards Ulo's shutdown signal to Rocket's `Shutdown::notify()`; the launch future resolves once Rocket has drained in-flight connections. Rocket's own Ctrl-C handling is disabled (`shutdown.ctrlc = false`), so signal wiring goes through the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) like every other adapter.
 
 ## Quirks
 

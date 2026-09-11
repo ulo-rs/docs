@@ -3,17 +3,17 @@ title: Development Workflow
 description: Rebuild and restart the server on save, and keep the port answering across restarts.
 ---
 
-Save a file, the project rebuilds, the server restarts. The CLI ships this loop as `toni dev`; the generic Rust watch tools do the same.
+Save a file, the project rebuilds, the server restarts. The CLI ships this loop as `ulo dev`; the generic Rust watch tools do the same.
 
-## toni dev
+## ulo dev
 
 From the project root:
 
 ```bash
-toni dev
+ulo dev
 ```
 
-Runs `cargo run` and restarts it on every save of a `.rs` or `.toml` file, with `.gitignore` paths, `.git/`, and `target/` excluded. Which package, binary, example, and features cargo builds are selectable, as are the profile and pass-through binary arguments — see [CLI Commands](/docs/cli/commands#toni-dev).
+Runs `cargo run` and restarts it on every save of a `.rs` or `.toml` file, with `.gitignore` paths, `.git/`, and `target/` excluded. Which package, binary, example, and features cargo builds are selectable, as are the profile and pass-through binary arguments — see [CLI Commands](/docs/cli/commands#ulo-dev).
 
 ## watchexec
 
@@ -45,7 +45,7 @@ bacon run
 `bacon run` rebuilds and restarts the application on save. Plain `bacon` runs `cargo check` on save instead — the fastest way to see errors while editing, when you don't need the server up.
 
 <FromNest>
-`toni dev` is the same loop as `nest start --watch`: recompile, restart. The unit
+`ulo dev` is the same loop as `nest start --watch`: recompile, restart. The unit
 is different — TypeScript recompiles in milliseconds, a Rust incremental rebuild
 takes seconds. The settings below matter here in a way they do not in Node.
 </FromNest>
@@ -85,10 +85,10 @@ curl --retry 5 --retry-connrefused http://localhost:3000/users
 
 The gap exists because the listening socket dies with the process. Move ownership of the socket to something that outlives the rebuild and it stops being a gap: connections wait in the kernel's accept queue and are answered when the new process starts accepting. A request made mid-rebuild sees latency instead of a refusal.
 
-`toni dev --listen` does exactly that: it binds the port itself and hands the same socket to every restart.
+`ulo dev --listen` does exactly that: it binds the port itself and hands the same socket to every restart.
 
 ```bash
-toni dev --listen 3000
+ulo dev --listen 3000
 ```
 
 The application has to take that socket instead of binding its own. [listenfd](https://crates.io/crates/listenfd) reads it:
@@ -102,7 +102,7 @@ Take the inherited socket when there is one, and bind normally when there isn't 
 
 ```rust
 let mut fds = listenfd::ListenFd::from_env();
-let target: toni::BindTarget = match fds.take_tcp_listener(0)? {
+let target: ulo::BindTarget = match fds.take_tcp_listener(0)? {
     Some(listener) => listener.into(),
     None => ("127.0.0.1", 3000).into(),
 };
@@ -112,7 +112,7 @@ app.use_http_adapter(AxumAdapter::new(), target)?;
 
 Save a file now and the request you fire during the rebuild is answered by the new process rather than refused.
 
-`toni-rocket` is the one adapter this does not work with — Rocket binds internally from its own configuration and rejects a pre-supplied listener, failing at `app.bind()`. See the [adapter capability table](/docs/http-adapters#official-adapters).
+`ulo-http-rocket` is the one adapter this does not work with — Rocket binds internally from its own configuration and rejects a pre-supplied listener, failing at `app.bind()`. See the [adapter capability table](/docs/http-adapters#official-adapters).
 
 `--listen` needs file-descriptor passing and is therefore Unix-only. [systemfd](https://crates.io/crates/systemfd) is the cross-platform alternative and works with any watcher, including plain `bacon` or `cargo watch`:
 

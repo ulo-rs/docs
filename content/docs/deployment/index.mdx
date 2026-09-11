@@ -3,7 +3,7 @@ title: Deployment
 description: Release builds, containers, and what to wire up before the process faces traffic.
 ---
 
-Two things need doing that a development run does not require. Signals must be connected to a `ShutdownHandle` — Toni installs no handlers, so an unwired process is killed rather than drained. And the listener should be reachable from outside the container, which means binding `0.0.0.0` rather than `127.0.0.1`.
+Two things need doing that a development run does not require. Signals must be connected to a `ShutdownHandle` — Ulo installs no handlers, so an unwired process is killed rather than drained. And the listener should be reachable from outside the container, which means binding `0.0.0.0` rather than `127.0.0.1`.
 
 <Cards>
   <Card title="Production Build" href="/docs/deployment/production" description="Release profiles, graceful shutdown, and running behind a reverse proxy." />

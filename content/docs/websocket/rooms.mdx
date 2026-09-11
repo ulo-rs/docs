@@ -12,11 +12,11 @@ Use `BroadcastService` (from `BroadcastModule`) to manage room membership and se
 Clients send JSON frames like `{"event": "join", "data": {"room": "lobby"}}` — the `event` field routes to the handler, and the handler parses the `data` payload from the full frame:
 
 ```rust
-use toni::websocket::{
+use ulo::websocket::{
     BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage,
 };
-use toni::WsHandlerResult;
-use toni::{module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
+use ulo::WsHandlerResult;
+use ulo::{module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/rooms")]
 pub struct RoomGateway {
@@ -214,8 +214,8 @@ async fn handle_typing(&self, client: WsClient, message: WsMessage) -> WsHandler
 `BroadcastService` is `Clone` — inject it into any service that needs to push to rooms:
 
 ```rust
-use toni::websocket::{BroadcastService, WsMessage};
-use toni::{injectable, new};
+use ulo::websocket::{BroadcastService, WsMessage};
+use ulo::{injectable, new};
 
 #[injectable]
 pub struct ChatService {

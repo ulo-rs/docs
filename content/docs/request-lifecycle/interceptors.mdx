@@ -12,8 +12,8 @@ On RPC, an interceptor that builds its own answer rather than forwarding one nam
 ## The Interceptor trait
 
 ```rust
-use toni::async_trait;
-use toni::context::HandlerContext;
+use ulo::async_trait;
+use ulo::context::HandlerContext;
 
 #[async_trait]
 pub trait InterceptorNext<C: ?Sized + HandlerContext, R>: Send {
@@ -26,7 +26,7 @@ pub trait Interceptor<C: ?Sized + HandlerContext, R>: Send + Sync {
 }
 ```
 
-Both live at `toni::traits_helpers::{Interceptor, InterceptorNext}`. `run` consumes `Box<Self>`, so the downstream chain can be invoked at most once.
+Both live at `ulo::traits_helpers::{Interceptor, InterceptorNext}`. `run` consumes `Box<Self>`, so the downstream chain can be invoked at most once.
 
 <FromNest>
 `intercept` receives the context and a `next`, as `NestInterceptor` does — but
@@ -40,10 +40,10 @@ short-circuits the handler.
 
 ```rust
 use std::time::Instant;
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::traits_helpers::{Interceptor, InterceptorNext};
-use toni::HttpResponse;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::traits_helpers::{Interceptor, InterceptorNext};
+use ulo::HttpResponse;
 
 pub struct TimingInterceptor;
 
@@ -93,7 +93,7 @@ impl Interceptor<HttpContext, HttpResponse> for AuditInterceptor {
 The returned response is owned — mutate it or replace it before returning:
 
 ```rust
-use toni::HttpResponse;
+use ulo::HttpResponse;
 
 pub struct CacheHeaderInterceptor;
 
@@ -122,7 +122,7 @@ Returning without calling `next.run` skips everything downstream — inner inter
 ```rust
 use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::json;
-use toni::HttpResponse;
+use ulo::HttpResponse;
 
 pub struct MaintenanceInterceptor {
     pub enabled: AtomicBool,
@@ -175,7 +175,7 @@ Downstream enhancers read it back with `ctx.extensions().get::<RequestId>()`.
 Declare the interceptor as an `#[injectable]` provider and implement the trait — no marker attribute. List it in the module's `providers` and apply it by bare type name:
 
 ```rust
-use toni::injectable;
+use ulo::injectable;
 
 #[injectable]
 pub struct WsLoggingInterceptor;
@@ -240,7 +240,7 @@ Bare type names resolve from DI (`#[use_interceptors(WsLoggingInterceptor)]`); e
 ```rust
 use std::sync::Arc;
 
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_http_interceptors(Arc::new(TimingInterceptor));
 ```
 

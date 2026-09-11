@@ -1,5 +1,5 @@
 ---
-title: toni-grpc
+title: ulo-grpc
 description: API reference for the gRPC adapter crate, its request extractors, and the build-script step that writes what each method carries.
 ---
 
@@ -8,7 +8,7 @@ description: API reference for the gRPC adapter crate, its request extractors, a
 The crate's only adapter type. It drives a [tonic](https://docs.rs/tonic) server through the application's bind / serve / drain lifecycle; services declared with `#[controller]` + `#[grpc_methods]` are discovered through DI and wrapped with the enhancer pipeline before tonic sees them.
 
 ```rust
-use toni_grpc::GrpcAdapter;
+use ulo_grpc::GrpcAdapter;
 
 GrpcAdapter::new(addr: SocketAddr) -> GrpcAdapter
 GrpcAdapter::from_listener(listener: std::net::TcpListener) -> GrpcAdapter
@@ -20,11 +20,11 @@ adapter.with_max_per_connection(impl Into<Option<usize>>) -> GrpcAdapter // defa
 adapter.with_tls(config: tonic::transport::ServerTlsConfig) -> GrpcAdapter
 ```
 
-Register it after `ToniFactory::create`, and run under a `LocalSet` — the application is `!Send`:
+Register it after `UloFactory::create`, and run under a `LocalSet` — the application is `!Send`:
 
 ```rust
 let addr: SocketAddr = "127.0.0.1:50051".parse()?;
-let mut app = ToniFactory::create(AppModule).await?;
+let mut app = UloFactory::create(AppModule).await?;
 app.use_grpc_adapter(GrpcAdapter::new(addr))?;
 app.start().await?;
 ```
@@ -50,7 +50,7 @@ Takes any tonic-generated service handle — a `*Server::new(handler)` value —
 It needs a crypto provider, which is a cargo feature — the same choice tonic asks for:
 
 ```toml title="Cargo.toml"
-toni-grpc = { version = "0.1", features = ["tls-ring"] }   # or "tls-aws-lc"
+ulo-grpc = { version = "0.1", features = ["tls-ring"] }   # or "tls-aws-lc"
 ```
 
 With both enabled, tonic resolves to ring. These are the crate's only features.
@@ -60,15 +60,15 @@ With both enabled, tonic resolves to ring. These are the crate's only features.
 ## to_status
 
 ```rust
-pub fn to_status<E: toni::Error>(error: E) -> tonic::Status
+pub fn to_status<E: ulo::Error>(error: E) -> tonic::Status
 ```
 
 Maps a domain error to a `tonic::Status` by its `kind()`, the way every transport renders one, and keeps the error on the status's source slot.
 
-A `#[grpc_methods]` handler returns its error and the generated method does this itself. What is left for this function is a service written against tonic's own trait and registered through `add_service`, outside the framework's dispatch — the orphan rule stops `toni` implementing `From<E>` into a foreign type, so the hop is written where both types are reachable:
+A `#[grpc_methods]` handler returns its error and the generated method does this itself. What is left for this function is a service written against tonic's own trait and registered through `add_service`, outside the framework's dispatch — the orphan rule stops `ulo` implementing `From<E>` into a foreign type, so the hop is written where both types are reachable:
 
 ```rust
-let order = self.orders.create(request.into_inner()).map_err(toni_grpc::to_status)?;
+let order = self.orders.create(request.into_inner()).map_err(ulo_grpc::to_status)?;
 ```
 
 For a bare `?`, give the error type the impl in the crate that owns it:
@@ -76,7 +76,7 @@ For a bare `?`, give the error type the impl in the crate that owns it:
 ```rust
 impl From<OrderError> for tonic::Status {
     fn from(e: OrderError) -> Self {
-        toni_grpc::to_status(e)
+        ulo_grpc::to_status(e)
     }
 }
 ```
@@ -111,19 +111,19 @@ pub trait MethodShape {
 }
 ```
 
-Implemented by the marker types [`toni-build`](#toni-build) writes, one per proto method. `#[grpc_methods]` names each generated signature's request type by projecting through the marker — `<greeter_toni::Greet as MethodShape>::Arg` — because a macro runs before name resolution and cannot resolve a type it reads off a handler. The same marker installs the request on the execution, which is what makes every handler parameter an ordinary `FromContext<GrpcContext>`.
+Implemented by the marker types [`ulo-build`](#ulo-build) writes, one per proto method. `#[grpc_methods]` names each generated signature's request type by projecting through the marker — `<greeter_ulo::Greet as MethodShape>::Arg` — because a macro runs before name resolution and cannot resolve a type it reads off a handler. The same marker installs the request on the execution, which is what makes every handler parameter an ordinary `FromContext<GrpcContext>`.
 
-`toni_grpc::shape` also exports the two installers a marker's `install` body calls: `message` for a method whose caller sends one message, `stream` for one whose caller streams.
+`ulo_grpc::shape` also exports the two installers a marker's `install` body calls: `message` for a method whose caller sends one message, `stream` for one whose caller streams.
 
 ---
 
-## toni-build
+## ulo-build
 
 The build-script half. A crate writing `#[grpc_methods]` needs it as a build-dependency:
 
 ```toml title="Cargo.toml"
 [build-dependencies]
-toni-build = "0.1"
+ulo-build = "0.1"
 tonic-prost-build = "0.14"
 ```
 

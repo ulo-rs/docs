@@ -1,6 +1,6 @@
-# Toni documentation
+# Ulo documentation
 
-The documentation site for [toni-rs](https://github.com/ifeanyi-ugwu/toni-rs), built with
+The documentation site for [ulo-rs](https://github.com/ulo-rs/ulo), built with
 [fumadocs](https://fumadocs.dev) on Next.js.
 
 ```bash
@@ -23,7 +23,7 @@ Pages need `title` and `description` frontmatter; the description is the search
 result and the meta tag, so write it as a sentence about the page.
 
 `<FromNest>` renders a collapsed "Coming from NestJS" aside. Use it only where a
-NestJS habit produces wrong Toni code and the correction is local to the page —
+NestJS habit produces wrong Ulo code and the correction is local to the page —
 the full decorator-to-macro map belongs on `/docs/coming-from-nestjs`, not
 repeated inline.
 

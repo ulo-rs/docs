@@ -10,8 +10,8 @@ A guard is a type that implements the `Guard<C>` trait. It has a single method, 
 ## The Guard trait
 
 ```rust
-use toni::async_trait;
-use toni::context::HandlerContext;
+use ulo::async_trait;
+use ulo::context::HandlerContext;
 
 #[async_trait]
 pub trait Guard<C: ?Sized + HandlerContext>: Send + Sync {
@@ -19,14 +19,14 @@ pub trait Guard<C: ?Sized + HandlerContext>: Send + Sync {
 }
 ```
 
-Import it from `toni::traits_helpers::Guard`. The context is a shared reference — guards read the request, metadata, and extensions. A guard can still attach values for downstream enhancers and the handler: `Extensions` mutates through `&self`.
+Import it from `ulo::traits_helpers::Guard`. The context is a shared reference — guards read the request, metadata, and extensions. A guard can still attach values for downstream enhancers and the handler: `Extensions` mutates through `&self`.
 
 ## A simple authentication guard
 
 ```rust
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::traits_helpers::Guard;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::traits_helpers::Guard;
 
 pub struct AuthGuard;
 
@@ -50,9 +50,9 @@ impl Guard<HttpContext> for AuthGuard {
 Guards can read metadata attached to routes with `#[set_metadata]`. Metadata is any `Clone + Send + Sync + 'static` type, retrieved by type via `metadata()`:
 
 ```rust
-use toni::async_trait;
-use toni::context::{HandlerContext, HttpContext};
-use toni::traits_helpers::Guard;
+use ulo::async_trait;
+use ulo::context::{HandlerContext, HttpContext};
+use ulo::traits_helpers::Guard;
 
 /// Required roles to access a route.
 #[derive(Clone)]
@@ -121,10 +121,10 @@ impl ApiController {
 Guards that need services are declared as `#[injectable]` providers and implement `Guard<C>` — no marker attribute. The framework detects the role from the trait impl:
 
 ```rust
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::injectable;
-use toni::traits_helpers::Guard;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::injectable;
+use ulo::traits_helpers::Guard;
 
 #[injectable]
 pub struct JwtGuard {
@@ -211,13 +211,13 @@ impl PostsController {
 
 ### Global (per transport)
 
-Global registration is per-transport on `ToniFactory`:
+Global registration is per-transport on `UloFactory`:
 
 ```rust
 use std::sync::Arc;
-use toni::ToniFactory;
+use ulo::UloFactory;
 
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_http_guards(Arc::new(AuthGuard));
 
 let mut app = factory.create_with(AppModule).await?;
@@ -371,14 +371,14 @@ To send a different status or body, register an error handler for the event with
 
 ```rust
 use serde_json::json;
-use toni::{catch, Error};
-use toni::context::HttpContext;
-use toni::HttpResponse;
+use ulo::{catch, Error};
+use ulo::context::HttpContext;
+use ulo::HttpResponse;
 
-#[catch(toni::errors::GuardRejection)]
-async fn auth_failure(err: &toni::errors::GuardRejection, _ctx: &HttpContext) -> HttpResponse {
+#[catch(ulo::errors::GuardRejection)]
+async fn auth_failure(err: &ulo::errors::GuardRejection, _ctx: &HttpContext) -> HttpResponse {
     HttpResponse::builder()
-        .status(toni::errors::http_status(err.kind()))
+        .status(ulo::errors::http_status(err.kind()))
         .json(json!({
             "error": "auth_required",
             "hint": "Send `x-auth-token: <token>`",
@@ -401,7 +401,7 @@ The context parameter picks the transport, and the return type follows from it: 
 
 <FromNest>
 `can_activate` is `CanActivate.canActivate` with one difference that changes how
-you write it: a Toni guard cannot throw. There is no `UnauthorizedException` to
+you write it: a Ulo guard cannot throw. There is no `UnauthorizedException` to
 raise from inside it — the guard returns `bool`, and `false` produces the default
 403 on an HTTP route. To answer with anything else, register a
 `#[catch(GuardRejection)]` handler.

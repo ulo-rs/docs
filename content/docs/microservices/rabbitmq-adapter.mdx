@@ -3,7 +3,7 @@ title: RabbitMQ Adapter
 description: AMQP queues as patterns — native reply_to/correlation_id request-response with direct reply-to clients.
 ---
 
-`toni-rabbitmq` maps each RPC pattern to an AMQP queue. AMQP carries request-response natively — a message names a `reply_to` queue and a `correlation_id` — so there is no envelope: the message body is the raw `RpcData` bytes and addressing lives in the message properties. Built on `lapin`; a RabbitMQ broker must be reachable from both sides.
+`ulo-rpc-rabbitmq` maps each RPC pattern to an AMQP queue. AMQP carries request-response natively — a message names a `reply_to` queue and a `correlation_id` — so there is no envelope: the message body is the raw `RpcData` bytes and addressing lives in the message properties. Built on `lapin`; a RabbitMQ broker must be reachable from both sides.
 
 ## Server setup
 
@@ -11,19 +11,19 @@ Add the dependencies:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-rabbitmq = "0.1"
+ulo = "0.2"
+ulo-rpc-rabbitmq = "0.1"
 ```
 
 Register the adapter:
 
 ```rust
-use toni::ToniFactory;
-use toni_rabbitmq::RabbitMqAdapter;
+use ulo::UloFactory;
+use ulo_rpc_rabbitmq::RabbitMqAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(RabbitMqAdapter::new("amqp://127.0.0.1:5672/%2f"))?;
     app.start().await?;
     Ok(())
@@ -51,13 +51,13 @@ Reply framing matches the other transports: `{"response": ...}` on success (hand
 
 A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the delivery's `reply_to`, each carrying the request's `correlation_id` — `{"stream": ...}` items closed by `{"end": true}`.
 
-Cancel notices travel on a fanout exchange named `toni.rpc.cancel`. Each server instance declares the exchange, binds one exclusive auto-delete queue of its own, and consumes it, so every instance sees every notice and only the one holding the call acts on it. The registry is keyed by `correlation_id`; a client's ids are prefixed with its own connection identity, so two callers on one broker cannot collide.
+Cancel notices travel on a fanout exchange named `ulo.rpc.cancel`. Each server instance declares the exchange, binds one exclusive auto-delete queue of its own, and consumes it, so every instance sees every notice and only the one holding the call acts on it. The registry is keyed by `correlation_id`; a client's ids are prefixed with its own connection identity, so two callers on one broker cannot collide.
 
 ## Client transport
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_rabbitmq::RabbitMqClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_rabbitmq::RabbitMqClientTransport;
 
 provider_value!(
     "ORDERS_CLIENT",

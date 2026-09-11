@@ -1,29 +1,29 @@
 ---
-title: toni-cli
-description: API reference for the Toni CLI tool.
+title: ulo-cli
+description: API reference for the Ulo CLI tool.
 ---
 
 ## Installation
 
 ```bash
-cargo install toni-cli
+cargo install ulo-cli
 ```
 
 ## Commands
 
-### toni new
+### ulo new
 
 ```
-toni new <project-name>
+ulo new <project-name>
 ```
 
-Scaffolds a new Toni project:
+Scaffolds a new Ulo project:
 
 ```
 <project-name>/
-├── Cargo.toml                 # toni 0.2.0, toni-axum 0.1.0, tokio
+├── Cargo.toml                 # ulo 0.2.0, ulo-http-axum 0.1.0, tokio
 └── src/
-    ├── main.rs                # ToniFactory + AxumAdapter on 127.0.0.1:3000
+    ├── main.rs                # UloFactory + AxumAdapter on 127.0.0.1:3000
     └── app/
         ├── mod.rs             # #[path]-based module declarations
         ├── app.module.rs      # AppModule wiring AppController + AppService
@@ -33,10 +33,10 @@ Scaffolds a new Toni project:
 
 Project names may contain only alphanumerics, `-`, and `_`. The target directory must not already exist.
 
-### toni generate resource
+### ulo generate resource
 
 ```
-toni generate resource <name>
+ulo generate resource <name>
 ```
 
 Run from the project root. Creates `src/app/<name>/`:
@@ -53,17 +53,17 @@ The resource is wired in automatically: `<Name>Module` is added to the `imports`
 
 `resource` is the only generate type.
 
-### toni dev
+### ulo dev
 
 ```
-toni dev [OPTIONS] [-- <args>...]
+ulo dev [OPTIONS] [-- <args>...]
 ```
 
 Runs `cargo run` and restarts the application whenever a `.rs` or `.toml` file changes (250 ms throttle). The watch excludes `.gitignore` paths, `**/target/**`, and `**/.git/**`. On restart the old process gets SIGTERM, then SIGKILL after a 2 s grace.
 
 | Flag | Effect |
 |------|--------|
-| `--listen <ADDR>` | Bind the socket once in the watcher and pass it to every restart via the `LISTEN_FDS` protocol; a bare port means localhost. Unix only; not supported with `toni-rocket` |
+| `--listen <ADDR>` | Bind the socket once in the watcher and pass it to every restart via the `LISTEN_FDS` protocol; a bare port means localhost. Unix only; not supported with `ulo-http-rocket` |
 | `--release` | Build and run in release mode |
 | `-p, --package <SPEC>` | Package to run, for a workspace with more than one |
 | `--bin <NAME>` | Run this binary instead of the package default |
@@ -76,11 +76,11 @@ Runs `cargo run` and restarts the application whenever a `.rs` or `.toml` file c
 
 The cargo command is assembled as `run`, `--release`, the target selector, `--features`, `--all-features`, `--no-default-features`, the `--cargo-arg` values in order, then `--` and the application arguments.
 
-The command sits behind toni-cli's default-on `dev` cargo feature; installing with `cargo install toni-cli --no-default-features` omits it. See [CLI Commands](/docs/cli/commands) for the dev-loop walkthrough.
+The command sits behind ulo-cli's default-on `dev` cargo feature; installing with `cargo install ulo-cli --no-default-features` omits it. See [CLI Commands](/docs/cli/commands) for the dev-loop walkthrough.
 
 ## Version
 
 ```bash
-toni --version   # prints the installed toni-cli crate version
-toni --help
+ulo --version   # prints the installed ulo-cli crate version
+ulo --help
 ```

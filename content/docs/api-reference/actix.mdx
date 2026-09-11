@@ -1,27 +1,27 @@
 ---
-title: toni-actix
+title: ulo-http-actix
 description: API reference for the Actix-web adapter crate.
 ---
 
 ## ActixAdapter
 
 ```rust
-use toni_actix::ActixAdapter;
+use ulo_http_actix::ActixAdapter;
 
 ActixAdapter::new() -> ActixAdapter
 ```
 
-Pass to `app.use_http_adapter` after `ToniFactory::create`:
+Pass to `app.use_http_adapter` after `UloFactory::create`:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_http_adapter(ActixAdapter::new(), ("0.0.0.0", 8080)).unwrap();
 app.start().await.unwrap();
 ```
 
-For HTTP routing, switching from `toni-axum` requires only changing the import and the adapter constructor call. Differences:
+For HTTP routing, switching from `ulo-http-axum` requires only changing the import and the adapter constructor call. Differences:
 
-- **No WebSocket support** — `ActixAdapter` implements `HttpAdapter` only. `register_ws_route` returns "This HTTP adapter does not support WebSocket upgrades", and the crate has no `WebSocketAdapter`; gateways need `toni-axum` or another WebSocket-capable adapter.
+- **No WebSocket support** — `ActixAdapter` implements `HttpAdapter` only. `register_ws_route` returns "This HTTP adapter does not support WebSocket upgrades", and the crate has no `WebSocketAdapter`; gateways need `ulo-http-axum` or another WebSocket-capable adapter.
 - **Bodies are buffered** — request and response bodies are read fully into memory. That rules out streaming responses, and with them Server-Sent Events: an `#[sse]` handler's stream is collected before anything reaches the client.
 - **Graceful shutdown** — closing the app stops the Actix server and waits for in-flight requests to finish.
 

@@ -26,7 +26,7 @@ Attribute markers (`#[body]`, `#[param]`, `#[query]`) offer a NestJS-style short
 Extracts typed values from URL path segments. Scalars parse from the raw segment (`Path<i32>`, `Path<bool>`, `Path<String>`); structs deserialize with each field typed:
 
 ```rust
-use toni::extractors::Path;
+use ulo::extractors::Path;
 
 // Single param
 #[get("/{id}")]
@@ -63,7 +63,7 @@ handler runs, so there is no `ParseIntPipe` to add.
 Deserializes the query string into a typed struct:
 
 ```rust
-use toni::extractors::Query;
+use ulo::extractors::Query;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -87,7 +87,7 @@ fn search(&self, Query(params): Query<SearchQuery>) -> HttpResponse {
 Deserializes the request body as JSON. The `Content-Type` header is not checked — the bytes are parsed as JSON regardless. An empty body is an error, as is malformed JSON; both produce a 400. An empty body reports `Request body is not JSON`, which is the message for that one case and not a content-type complaint.
 
 ```rust
-use toni::extractors::Json;
+use ulo::extractors::Json;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -112,7 +112,7 @@ Deserializes the body based on the `Content-Type` header:
 - any other content type → error (400)
 
 ```rust
-use toni::extractors::Body;
+use ulo::extractors::Body;
 
 #[post("/")]
 fn create(&self, Body(dto): Body<CreateUserDto>) -> HttpResponse {
@@ -122,14 +122,14 @@ fn create(&self, Body(dto): Body<CreateUserDto>) -> HttpResponse {
 
 Use `Json` when the endpoint only accepts JSON. Use `Body` when it also needs to support form submissions.
 
-Two different types are spelled `Body`: `toni::extractors::Body<T>` is this extractor, and `toni::Body` is the response body a handler returns. A handler that takes one and returns the other needs an alias on one of the imports — `use toni::Body as ToniBody;` — or two `use` statements naming the same identifier collide.
+Two different types are spelled `Body`: `ulo::extractors::Body<T>` is this extractor, and `ulo::Body` is the response body a handler returns. A handler that takes one and returns the other needs an alias on one of the imports — `use ulo::Body as UloBody;` — or two `use` statements naming the same identifier collide.
 
 ## Bytes — raw binary data
 
 Buffers the entire request body into a `Vec<u8>`:
 
 ```rust
-use toni::extractors::Bytes;
+use ulo::extractors::Bytes;
 
 #[post("/upload")]
 fn upload(&self, Bytes(data): Bytes) -> HttpResponse {
@@ -146,7 +146,7 @@ Yields the body as a raw stream of chunks, never loading it into memory at once.
 
 ```rust
 use futures::StreamExt;
-use toni::{Body, BodyStream};
+use ulo::{Body, BodyStream};
 
 #[post("/upload")]
 async fn upload(&self, stream: BodyStream) -> Body {
@@ -163,7 +163,7 @@ async fn upload(&self, stream: BodyStream) -> Body {
 
 Extraction itself cannot fail on `BodyStream`'s own terms — its error type is `BodyExtractionError<Infallible>`, so the only possible failure is finding the body already read by another extractor.
 
-`toni-actix` and `toni-rocket` hand the framework a body that is already buffered. `BodyStream` and `Multipart` still work there, with the bytes wrapped as a single-chunk stream — but nothing is incremental, and the memory is spent before the handler runs. Stream on `toni-axum`, `toni-salvo`, or `toni-poem`.
+`ulo-http-actix` and `ulo-http-rocket` hand the framework a body that is already buffered. `BodyStream` and `Multipart` still work there, with the bytes wrapped as a single-chunk stream — but nothing is incremental, and the memory is spent before the handler runs. Stream on `ulo-http-axum`, `ulo-http-salvo`, or `ulo-http-poem`.
 
 ## Multipart — form-data and file uploads
 
@@ -174,7 +174,7 @@ Parses `multipart/form-data` bodies field by field. See [Multipart / File Upload
 A plain `HttpRequest` parameter hands the handler the full request (metadata plus body). It counts as the body consumer for that handler.
 
 ```rust
-use toni::HttpRequest;
+use ulo::HttpRequest;
 
 #[post("/raw")]
 async fn raw(&self, req: HttpRequest) -> HttpResponse {
@@ -188,7 +188,7 @@ async fn raw(&self, req: HttpRequest) -> HttpResponse {
 A `Request` parameter is a read-only view of the request metadata: method, URI, headers, path params, query params, and extensions. It never touches the body, so it sits beside any body extractor, and extraction is infallible.
 
 ```rust
-use toni::Request;
+use ulo::Request;
 
 #[get("/info")]
 fn info(&self, req: Request) -> Body {
@@ -204,7 +204,7 @@ fn info(&self, req: Request) -> Body {
 `Extensions` is the typed key-value bag shared by everything handling the current message — a guard inserts a value, the handler reads it back by type. Extraction is infallible: a message with nothing attached yields an empty bag.
 
 ```rust
-use toni::context::Extensions;
+use ulo::context::Extensions;
 
 #[get("/me")]
 fn me(&self, ext: Extensions) -> Body {
@@ -242,7 +242,7 @@ An `Option`-wrapped body extractor still reads the body, so it counts as the han
 Wraps an extractor and runs `validator` crate validation on the inner value before the handler sees it:
 
 ```rust
-use toni::extractors::{Json, Validated};
+use ulo::extractors::{Json, Validated};
 use serde::Deserialize;
 use validator::Validate;
 
@@ -297,8 +297,8 @@ A validation failure returns the same 400 shape as any other extraction failure,
 `Validated<E>` is generic over the context, not tied to HTTP: its impl reads `E: FromContext<C> + ValidatableExtractor` for any handler context `C`. `Validated<Payload<T>>` is therefore the same wrapper in a `#[subscribe_message]`, `#[message_pattern]`, or `#[grpc_method]` handler, validating the message the transport delivered:
 
 ```rust
-use toni::extractors::{Payload, Validated};
-use toni::{RpcData, RpcError};
+use ulo::extractors::{Payload, Validated};
+use ulo::{RpcData, RpcError};
 
 #[message_pattern("users.create")]
 async fn create_user(
