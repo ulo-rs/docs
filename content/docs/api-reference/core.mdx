@@ -1,27 +1,27 @@
 ---
-title: toni (core)
-description: API reference for the toni core crate — types, traits, and the application factory.
+title: ulo (core)
+description: API reference for the ulo core crate — types, traits, and the application factory.
 ---
 
-Reference for the public surface of the `toni` crate. Items are shown with their crate-root import path where one exists; types not re-exported at the root list their module path.
+Reference for the public surface of the `ulo` crate. Items are shown with their crate-root import path where one exists; types not re-exported at the root list their module path.
 
-## ToniFactory
+## UloFactory
 
-`toni::ToniFactory` — builds the DI container and produces a `ToniApplication` or a standalone `ToniApplicationContext`.
+`ulo::UloFactory` — builds the DI container and produces a `UloApplication` or a standalone `UloApplicationContext`.
 
 ```rust
-ToniFactory::new() -> ToniFactory
+UloFactory::new() -> UloFactory
 
 // Shorthand — no factory config needed
-ToniFactory::create(module: impl ModuleMetadata + 'static) -> Result<ToniApplication, StartupError>        // async
-ToniFactory::create_application_context(module) -> Result<ToniApplicationContext, StartupError>            // async
+UloFactory::create(module: impl ModuleMetadata + 'static) -> Result<UloApplication, StartupError>        // async
+UloFactory::create_application_context(module) -> Result<UloApplicationContext, StartupError>            // async
 
 // Instance methods (use after registering globals)
-factory.create_with(module) -> Result<ToniApplication, StartupError>                                       // async
-factory.create_application_context_with(module) -> Result<ToniApplicationContext, StartupError>            // async
+factory.create_with(module) -> Result<UloApplication, StartupError>                                       // async
+factory.create_application_context_with(module) -> Result<UloApplicationContext, StartupError>            // async
 ```
 
-Modules pass directly: `ToniFactory::create(AppModule).await?`. Any `ModuleMetadata` works as the root — including a `DynamicModule` or a `CheckedModule` from an integration's `for_root`-style constructor. Failures are returned as [`StartupError`](#startuperror): `Setup` for a module graph that does not resolve, `HookFailed` for an `on_module_init` hook that returned `Err`. `create_application_context*` also runs `on_application_bootstrap` hooks (a standalone context has no `bind()` phase), so those failures surface here too.
+Modules pass directly: `UloFactory::create(AppModule).await?`. Any `ModuleMetadata` works as the root — including a `DynamicModule` or a `CheckedModule` from an integration's `for_root`-style constructor. Failures are returned as [`StartupError`](#startuperror): `Setup` for a module graph that does not resolve, `HookFailed` for an `on_module_init` hook that returned `Err`. `create_application_context*` also runs `on_application_bootstrap` hooks (a standalone context has no `bind()` phase), so those failures surface here too.
 
 ### Global registration
 
@@ -54,14 +54,14 @@ factory.use_global_grpc_error_handler(Arc<dyn ErrorHandler<GrpcContext, GrpcStat
 Global error handlers stack with controller- and method-level handlers; the most specific is consulted first. A handler that returns `None` sees the error without answering it, which is how logging and metrics attach to the chain.
 
 ```rust
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_http_guards(Arc::new(AuthGuard::default()));
 let app = factory.create_with(AppModule).await?;
 ```
 
-## ToniApplication
+## UloApplication
 
-Returned by `ToniFactory::create` / `create_with`. Configure adapters, then `bind()` + `run()` (or `start()` for both in one step).
+Returned by `UloFactory::create` / `create_with`. Configure adapters, then `bind()` + `run()` (or `start()` for both in one step).
 
 Startup runs in three phases, each with its own failure class:
 
@@ -89,7 +89,7 @@ RPC and gRPC adapters take their address in their own constructors.
 
 ### BindTarget
 
-Where an HTTP adapter listens. `toni::BindTarget`, taken by `use_http_adapter` as `impl Into<BindTarget>` and threaded into `HttpAdapter::into_lifecycle`.
+Where an HTTP adapter listens. `ulo::BindTarget`, taken by `use_http_adapter` as `impl Into<BindTarget>` and threaded into `HttpAdapter::into_lifecycle`.
 
 ```rust
 #[non_exhaustive]
@@ -102,7 +102,7 @@ target.into_std_listener() -> io::Result<TcpListener>   // binds for Addr, passe
 // From<(&str, u16)> / From<(String, u16)> / From<std::net::TcpListener>
 ```
 
-The conversions are why `("127.0.0.1", 3000)` and a bare listener both read as call arguments. `Listener` serves callers that acquire the socket first — a test harness binding port 0, a supervisor holding the socket across restarts. The enum is `#[non_exhaustive]`, so a `match` outside `toni` needs a wildcard arm. See [Bind targets](/docs/techniques/bind-targets) for the adapters that adopt a listener and the one that refuses.
+The conversions are why `("127.0.0.1", 3000)` and a bare listener both read as call arguments. `Listener` serves callers that acquire the socket first — a test harness binding port 0, a supervisor holding the socket across restarts. The enum is `#[non_exhaustive]`, so a `match` outside `ulo` needs a wildcard arm. See [Bind targets](/docs/techniques/bind-targets) for the adapters that adopt a listener and the one that refuses.
 
 ### Lifecycle
 
@@ -115,13 +115,13 @@ app.shutdown_handle() -> ShutdownHandle
 ```
 
 - `bind()` runs bootstrap hooks, discovers gateways/RPC controllers/gRPC services, and binds every adapter. Sockets are listening when it returns — pass port `0` and read the assigned address from `BoundAdapters`.
-- Every transport the application declares must come up. A failing adapter returns `StartupError::Adapter`; a declaration with nothing registered to serve it returns `StartupError::Setup`. Every adapter takes its handlers before any socket is acquired, so a wrong application reports before a busy environment. `toni-tcp` and `toni-udp` bind during registration, so a port conflict on either surfaces ahead of a misconfiguration on another transport. On failure, sockets already acquired are closed and the application enters a terminal failed state — build a new one.
+- Every transport the application declares must come up. A failing adapter returns `StartupError::Adapter`; a declaration with nothing registered to serve it returns `StartupError::Setup`. Every adapter takes its handlers before any socket is acquired, so a wrong application reports before a busy environment. `ulo-rpc-tcp` and `ulo-rpc-udp` bind during registration, so a port conflict on either surfaces ahead of a misconfiguration on another transport. On failure, sockets already acquired are closed and the application enters a terminal failed state — build a new one.
 - `run()` panics if called before `bind()`. On a shutdown signal it closes adapters first (draining in-flight requests), then runs lifecycle hooks. A serve loop that returns on its own signals shutdown for the whole application — a process serving less than it advertises does not keep running.
 - `close()` returns `()`, not `Result` — no `?` or `.unwrap()`.
 - The framework installs no SIGTERM/SIGINT handlers. Wire signals to `shutdown_handle()` yourself.
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await?;
+let mut app = UloFactory::create(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 0))?;
 let bound = app.bind().await?;
 println!("listening on {}", bound.http.unwrap());
@@ -130,7 +130,7 @@ app.run().await;
 
 ### DI access
 
-Same surface as `ToniApplicationContext` (delegates to it); all async, all return `anyhow::Result<T>`.
+Same surface as `UloApplicationContext` (delegates to it); all async, all return `anyhow::Result<T>`.
 
 ```rust
 app.get::<T>() -> Result<T>                                      // search all modules by type
@@ -196,9 +196,9 @@ pub enum StartupError {
 
 `HookFailed` names the failing module and hook: it comes from `create` for `on_module_init` and from `bind()` for `on_application_bootstrap`. `Adapter` names the transport that could not start; only `bind()` produces it. The enum is `#[non_exhaustive]` — match with a wildcard arm.
 
-## ToniApplicationContext
+## UloApplicationContext
 
-`toni::ToniApplicationContext` — the full DI container without a server, for CLI tools, cron jobs, and background workers. Created by `ToniFactory::create_application_context`.
+`ulo::UloApplicationContext` — the full DI container without a server, for CLI tools, cron jobs, and background workers. Created by `UloFactory::create_application_context`.
 
 ```rust
 ctx.get::<T>() -> Result<T>
@@ -214,9 +214,9 @@ ctx.close(&mut self)        // async — returns (); runs destroy/shutdown hooks
 
 ## Contexts
 
-`toni::context` — per-execution contexts, one concrete type per transport plus `StandaloneContext` for work that arrived over none. All five implement `HandlerContext`, so an enhancer can be written for one transport (`Guard<HttpContext>`) or all of them (`impl<C: HandlerContext + ?Sized> Guard<C>`). Every context is a cheap-clone handle: cloning shares the execution rather than copying it, and its state (`Extensions`, `ExecutionCache`, `CancellationToken`) mutates through `&self`.
+`ulo::context` — per-execution contexts, one concrete type per transport plus `StandaloneContext` for work that arrived over none. All five implement `HandlerContext`, so an enhancer can be written for one transport (`Guard<HttpContext>`) or all of them (`impl<C: HandlerContext + ?Sized> Guard<C>`). Every context is a cheap-clone handle: cloning shares the execution rather than copying it, and its state (`Extensions`, `ExecutionCache`, `CancellationToken`) mutates through `&self`.
 
-Re-exported at the root: `HandlerContext`, `HttpContext`, `RpcContext`, `WsContext`, `GrpcContext`, `StandaloneContext`, `CancellationToken`. `Extensions` and `Metadata` are at `toni::context`, not the root.
+Re-exported at the root: `HandlerContext`, `HttpContext`, `RpcContext`, `WsContext`, `GrpcContext`, `StandaloneContext`, `CancellationToken`. `Extensions` and `Metadata` are at `ulo::context`, not the root.
 
 ### HandlerContext
 
@@ -278,13 +278,13 @@ ctx.header(key: &str) -> Option<&str>
 ctx.peer() -> Option<SocketAddr>
 ```
 
-A `#[grpc_methods]` handler takes `&GrpcContext` as an ordinary parameter, as it does on the other three transports, and reads `#[set_metadata]` declarations through it. The message itself is not on the context: it rides erased in a slot one parameter takes — `Payload<T>`, `Inbound<T>`, or `toni_grpc::GrpcRequest<T>`.
+A `#[grpc_methods]` handler takes `&GrpcContext` as an ordinary parameter, as it does on the other three transports, and reads `#[set_metadata]` declarations through it. The message itself is not on the context: it rides erased in a slot one parameter takes — `Payload<T>`, `Inbound<T>`, or `ulo_grpc::GrpcRequest<T>`.
 
 ```rust
 GrpcContext::of(request.extensions()) -> Option<GrpcContext>
 ```
 
-That is for a service written against tonic's own trait and registered through `GrpcAdapter::add_service`, which has no toni execution behind it and answers `None`. `Extensions::adopt(request.extensions())` reaches the bag alone.
+That is for a service written against tonic's own trait and registered through `GrpcAdapter::add_service`, which has no ulo execution behind it and answers `None`. `Extensions::adopt(request.extensions())` reaches the bag alone.
 
 ### StandaloneContext
 
@@ -309,7 +309,7 @@ The framework fires it when a reply the caller walked away from is dropped mid-f
 
 ### Extensions
 
-`toni::context::Extensions` — the per-execution typed bag every context carries, reached with `ctx.extensions()`. An `Arc<Mutex<…>>` handle: cloning shares one bag, and every method takes `&self`, so a guard's write is visible to the handler built before it ran.
+`ulo::context::Extensions` — the per-execution typed bag every context carries, reached with `ctx.extensions()`. An `Arc<Mutex<…>>` handle: cloning shares one bag, and every method takes `&self`, so a guard's write is visible to the handler built before it ran.
 
 ```rust
 ext.insert<T: Send + Sync + 'static>(value: T) -> Option<T>   // returns what it replaced
@@ -330,7 +330,7 @@ Extensions::ensure(&mut http::Extensions) -> Self
 
 ## Enhancer traits
 
-Import from `toni::traits_helpers::*` (guards, interceptors, error handlers) and `toni::middleware::*` (middleware). All are generic over the context type `C: HandlerContext`; interceptors and error handlers are additionally generic over `R`, what the transport answers with. There are no role-marker macros — the framework detects the role from the trait impl on an `#[injectable]` type.
+Import from `ulo::traits_helpers::*` (guards, interceptors, error handlers) and `ulo::middleware::*` (middleware). All are generic over the context type `C: HandlerContext`; interceptors and error handlers are additionally generic over `R`, what the transport answers with. There are no role-marker macros — the framework detects the role from the trait impl on an `#[injectable]` type.
 
 `R` per transport for interceptors:
 
@@ -385,14 +385,14 @@ pub trait ErrorHandler<C: ?Sized + HandlerContext, R>: Send + Sync {
 
 The chain is the whole error seam. It sees user-handler errors — an `AppError` unwrapped to the domain error it wraps — and framework events alike, and a handler returning `None` observes one without shaping it.
 
-`toni::traits_helpers::error_handler` also exports the fallbacks the framework installs: `DefaultHttpErrorHandler`, `DefaultRpcErrorHandler`, `DefaultWsErrorHandler`.
+`ulo::traits_helpers::error_handler` also exports the fallbacks the framework installs: `DefaultHttpErrorHandler`, `DefaultRpcErrorHandler`, `DefaultWsErrorHandler`.
 
 ### Middleware
 
 HTTP-only. Global middleware runs before the adapter resolves the route — it observes every request, including 404s, 405s, and WebSocket upgrades, and a request rewritten via `run_with` changes which route matches. Module-scoped middleware runs after routing, on the matched route, before guards.
 
 ```rust
-use toni::middleware::{Middleware, NextHandle, MiddlewareResult};
+use ulo::middleware::{Middleware, NextHandle, MiddlewareResult};
 
 pub type MiddlewareResult = Result<HttpResponse, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -418,7 +418,7 @@ The body arrives as `RequestBody::Streaming` and is single-use. To inspect it, c
 Built-in CORS for the global chain:
 
 ```rust
-use toni::middleware::{CorsMiddleware, CorsOptions, AllowedOrigins};
+use ulo::middleware::{CorsMiddleware, CorsOptions, AllowedOrigins};
 
 CorsMiddleware::new(options: CorsOptions) -> CorsMiddleware   // implements Middleware
 CorsMiddleware::permissive() -> CorsMiddleware                // CorsOptions::default()
@@ -437,9 +437,9 @@ Preflight requests are answered directly with 204 before routing. See [CORS](/do
 
 ## Error system
 
-### toni::Error and ErrorKind
+### ulo::Error and ErrorKind
 
-The framework's error contract. A handler returns `Result<T, E>` where `E: toni::Error`; a `From<E: Error>` blanket lifts it into the active transport's error type (`HttpError` / `RpcError` / `WsError`) via `?`, and the transport renders the canonical envelope from `kind` / `message` / `details`.
+The framework's error contract. A handler returns `Result<T, E>` where `E: ulo::Error`; a `From<E: Error>` blanket lifts it into the active transport's error type (`HttpError` / `RpcError` / `WsError`) via `?`, and the transport renders the canonical envelope from `kind` / `message` / `details`.
 
 ```rust
 pub trait Error: std::error::Error + Send + Sync + 'static {
@@ -460,11 +460,11 @@ pub trait Error: std::error::Error + Send + Sync + 'static {
 | `Conflict` | 409 | `Internal` | 500 |
 | `UnprocessableEntity` | 422 | | |
 
-`ErrorKind::name()` returns the variant name (`"NotFound"`) — the stable `kind` string in RPC/WS wire envelopes. Derive the trait with `#[derive(toni::Error)]` + `#[error_kind(KIND)]` (see the macros reference), or implement `kind()` by hand.
+`ErrorKind::name()` returns the variant name (`"NotFound"`) — the stable `kind` string in RPC/WS wire envelopes. Derive the trait with `#[derive(ulo::Error)]` + `#[error_kind(KIND)]` (see the macros reference), or implement `kind()` by hand.
 
 ### HttpError
 
-`toni::HttpError` — the HTTP transport's handler error type.
+`ulo::HttpError` — the HTTP transport's handler error type.
 
 ```rust
 HttpError::bad_request(msg) / unauthorized(msg) / forbidden(msg) / not_found(msg)
@@ -477,7 +477,7 @@ err.error_type() -> &'static str
 err.to_response() -> HttpResponse
 ```
 
-The `AppError(Arc<dyn Error>)` variant carries a user-domain `toni::Error`; the `From<E: Error>` blanket constructs it — handlers never build it by hand. Canonical envelope:
+The `AppError(Arc<dyn Error>)` variant carries a user-domain `ulo::Error`; the `From<E: Error>` blanket constructs it — handlers never build it by hand. Canonical envelope:
 
 ```json
 { "statusCode": 404, "message": "...", "error": "Not Found", "details": { } }
@@ -487,7 +487,7 @@ The `AppError(Arc<dyn Error>)` variant carries a user-domain `toni::Error`; the 
 
 ### RpcError
 
-`toni::RpcError` (also `toni::rpc::RpcError`).
+`ulo::RpcError` (also `ulo::rpc::RpcError`).
 
 ```rust
 pub enum RpcError {
@@ -504,7 +504,7 @@ Framework variants reach the adapter as wire-`err` frames; `AppError` reaches it
 
 ### WsError
 
-`toni::WsError` (also `toni::websocket::WsError`).
+`ulo::WsError` (also `ulo::websocket::WsError`).
 
 ```rust
 pub enum WsError {
@@ -523,11 +523,11 @@ err.to_message() -> WsMessage  // text frame: {"status":"error","kind":"...","me
 
 `Refused` is for a subprotocol that defines its own refusal codes — graphql-ws closes with 4406 for an unacceptable `Sec-WebSocket-Protocol` — where an envelope frame would be noise the client has no grammar for.
 
-`toni::websocket` also exports the two functions the adapters render a refusal with: `close_code(&WsError) -> u16` (1008 for a client-fault refusal, 1013 for rate limiting, 1011 for a server fault) and `refusal_frames(&WsError) -> Vec<WsMessage>` (the envelope, then the close).
+`ulo::websocket` also exports the two functions the adapters render a refusal with: `close_code(&WsError) -> u16` (1008 for a client-fault refusal, 1013 for rate limiting, 1011 for a server fault) and `refusal_frames(&WsError) -> Vec<WsMessage>` (the envelope, then the close).
 
 ### Framework events
 
-`toni::{GuardRejection, MiddlewareFailure, PanicRecovered, PipelineSegment}` and `toni::errors::Unrouted` — typed events emitted when the framework itself is the error source. Each implements `toni::Error` and flows through the error-handler chain, so `#[catch(GuardRejection)]` can reshape the default 403.
+`ulo::{GuardRejection, MiddlewareFailure, PanicRecovered, PipelineSegment}` and `ulo::errors::Unrouted` — typed events emitted when the framework itself is the error source. Each implements `ulo::Error` and flows through the error-handler chain, so `#[catch(GuardRejection)]` can reshape the default 403.
 
 | Event | `kind()` | Emitted when |
 |---|---|---|
@@ -542,7 +542,7 @@ err.to_message() -> WsMessage  // text frame: {"status":"error","kind":"...","me
 
 ## HTTP helpers
 
-`toni::http_helpers`, with the main types re-exported at the root.
+`ulo::http_helpers`, with the main types re-exported at the root.
 
 ### HttpRequest and RequestPart
 
@@ -609,7 +609,7 @@ Implemented for `HttpResponse`, `Body`, `String`, `&'static str`, `serde_json::V
 
 ### Metadata
 
-`toni::context::Metadata` (not a root re-export) — a handler's declared configuration, built once at registration from the `#[set_metadata(...)]` entries on the handler and on its impl block, and shared unchanged by every execution on every transport.
+`ulo::context::Metadata` (not a root re-export) — a handler's declared configuration, built once at registration from the `#[set_metadata(...)]` entries on the handler and on its impl block, and shared unchanged by every execution on every transport.
 
 ```rust
 metadata.insert<T: Clone + Send + Sync + 'static>(val: T)   // records; never replaces
@@ -622,7 +622,7 @@ Read in enhancers via `ctx.metadata().and_then(|m| m.get::<T>())`. A type nothin
 ### Server-Sent Events
 
 ```rust
-use toni::{sse, Sse, SseEvent};
+use ulo::{sse, Sse, SseEvent};
 
 SseEvent::data(impl Into<String>) -> SseEvent
     .id(impl Into<String>)        // sent back as Last-Event-ID on reconnect
@@ -637,7 +637,7 @@ Sse::new(stream)                  // fallible: S: Stream<Item = Result<SseEvent,
 
 ## Extractors
 
-`toni::extractors` (also `toni::{BodyStream, FromContext, take_body}` at the root). Handler parameters are extracted by type — anything implementing `FromContext` for the handler's context.
+`ulo::extractors` (also `ulo::{BodyStream, FromContext, take_body}` at the root). Handler parameters are extracted by type — anything implementing `FromContext` for the handler's context.
 
 ### FromContext
 
@@ -685,7 +685,7 @@ The rule is read off the types, not their names: `#[routes]` asserts `<Ty as Fro
 
 `Path`, `Query`, `Json`, `Body`, `Bytes`, and `Validated` expose the value as field `0`, `into_inner()`, and `Deref`. `BodyStream` and `Multipart` do not — they are consumed through their own methods.
 
-Two more live in `toni::extractors` for the transports whose message is the payload: `Payload<T>`, the call's message deserialised, on RPC, WebSocket and gRPC; and `Inbound<T>`, the caller's stream on a client-streaming or bidirectional gRPC method, whose items fail with `GrpcStatus`.
+Two more live in `ulo::extractors` for the transports whose message is the payload: `Payload<T>`, the call's message deserialised, on RPC, WebSocket and gRPC; and `Inbound<T>`, the caller's stream on a client-streaming or bidirectional gRPC method, whose items fail with `GrpcStatus`.
 
 ```rust
 #[post("/users")]
@@ -709,11 +709,11 @@ pub trait ValidatableExtractor {
 
 `Validated<E>` reads only what `E` reads: `Validated<Query<T>>` is a metadata extractor and may sit beside a body extractor on the same handler; `Validated<Json<T>>` counts as the body reader.
 
-Failure type is `ValidationError` (`ExtractionError(String)` | `ValidationFailed(validator::ValidationErrors)`); both `ValidatableExtractor` and `ValidationError` are exported from `toni::extractors`.
+Failure type is `ValidationError` (`ExtractionError(String)` | `ValidationFailed(validator::ValidationErrors)`); both `ValidatableExtractor` and `ValidationError` are exported from `ulo::extractors`.
 
 ## RPC client
 
-`toni::rpc` (main types re-exported at the root). `RpcClient` wraps any `RpcClientTransport` (TCP, NATS, etc. — provided by adapter crates) and is `Clone`.
+`ulo::rpc` (main types re-exported at the root). `RpcClient` wraps any `RpcClientTransport` (TCP, NATS, etc. — provided by adapter crates) and is `Clone`.
 
 ```rust
 RpcClient::new(transport: impl RpcClientTransport) -> RpcClient
@@ -784,7 +784,7 @@ Wire-level call info adapters pass into the dispatcher: `pattern: String`, `head
 
 ## gRPC types
 
-`toni::grpc_status` (re-exported at the root). Transport-neutral mirrors of `tonic::Status` / `tonic::Code`, so handlers, guards and error handlers name gRPC errors without a tonic dependency; the [`toni-grpc`](/docs/api-reference/grpc) adapter converts at the wire boundary. The service form — `#[controller]` plus `#[grpc_methods]` — is in the [gRPC chapter](/docs/grpc/quick-start).
+`ulo::grpc_status` (re-exported at the root). Transport-neutral mirrors of `tonic::Status` / `tonic::Code`, so handlers, guards and error handlers name gRPC errors without a tonic dependency; the [`ulo-grpc`](/docs/api-reference/grpc) adapter converts at the wire boundary. The service form — `#[controller]` plus `#[grpc_methods]` — is in the [gRPC chapter](/docs/grpc/quick-start).
 
 ```rust
 pub struct GrpcStatus {
@@ -797,8 +797,8 @@ GrpcStatus::new(code: GrpcCode, message)
 GrpcStatus::permission_denied(msg) / invalid_argument(msg) / internal(msg)
 GrpcStatus::not_found(msg) / unauthenticated(msg)
 
-GrpcStatus::of<E: toni::Error>(error: E) -> GrpcStatus   // owned; a GrpcStatus answers as itself
-GrpcStatus::from_error(&(dyn toni::Error + Send + Sync)) -> GrpcStatus   // borrowed; keeps nothing
+GrpcStatus::of<E: ulo::Error>(error: E) -> GrpcStatus   // owned; a GrpcStatus answers as itself
+GrpcStatus::from_error(&(dyn ulo::Error + Send + Sync)) -> GrpcStatus   // borrowed; keeps nothing
 status.caused_by(error: E) -> GrpcStatus          // keep a domain error on a hand-named code
 status.source() -> Option<&dyn Error>
 status.into_source() -> Option<Arc<dyn Error>>
@@ -806,7 +806,7 @@ status.into_source() -> Option<Arc<dyn Error>>
 
 The third field is private, so build a status through a constructor rather than a struct literal. It is what carries the domain error to the chain: `of` keeps the error it mapped, `caused_by` attaches one to a code you named yourself, and `#[catch(MyError)]` matches on either.
 
-`GrpcStatus` implements `toni::Error`, so a handler returns one to name a code no `ErrorKind` reaches — `AlreadyExists`, `FailedPrecondition`, `DataLoss`.
+`GrpcStatus` implements `ulo::Error`, so a handler returns one to name a code no `ErrorKind` reaches — `AlreadyExists`, `FailedPrecondition`, `DataLoss`.
 
 ```rust
 grpc_code(kind: ErrorKind) -> GrpcCode    // the canonical table: NotFound → NOT_FOUND, Conflict → ABORTED
@@ -817,7 +817,7 @@ error_kind(code: GrpcCode) -> ErrorKind   // the inverse; a code the table has n
 
 ## WebSocket types
 
-`toni::websocket` (re-exported at the root). The gateway programming model is documented in the WebSocket section; the types below appear in handler signatures.
+`ulo::websocket` (re-exported at the root). The gateway programming model is documented in the WebSocket section; the types below appear in handler signatures.
 
 ```rust
 pub enum WsMessage { Text(String), Binary(Vec<u8>), Ping(Vec<u8>), Pong(Vec<u8>), Close(Option<CloseFrame>) }
@@ -841,10 +841,10 @@ pub type WsHandlerResult = Result<WsHandlerOutput, WsError>;
 ## DI utilities
 
 ```rust
-// toni::ProviderScope — provider lifecycle
+// ulo::ProviderScope — provider lifecycle
 pub enum ProviderScope { Singleton, Request, Transient }   // Request = one instance per execution
 
-// toni::DynamicModule — module built at runtime
+// ulo::DynamicModule — module built at runtime
 DynamicModule::builder(id) -> DynamicModuleBuilder
     .provider(factory).export::<T>().export_token(token).global().build()
 ```
@@ -853,10 +853,10 @@ DynamicModule::builder(id) -> DynamicModuleBuilder
 
 ### Tokens
 
-`toni::di` holds the one definition of a container key.
+`ulo::di` holds the one definition of a container key.
 
 ```rust
-toni::di::token_of::<T>() -> String     // the fully-qualified type_name, base and generics alike
+ulo::di::token_of::<T>() -> String     // the fully-qualified type_name, base and generics alike
 
 pub struct Token<T: ?Sized>;            // a named token that documents what it resolves to
 Token::<T>::new(name: &'static str) -> Token<T>    // const
@@ -903,7 +903,7 @@ Two imports of one module with identical configuration render the same key and d
 
 ### Extension
 
-`toni::Extension<T>` — the request-scoped DI view of one type in the [extension bag](#extensions), for code below the controller that would otherwise have the value threaded down through every signature. It holds the bag, not a copy, so a write from a guard is visible to a holder constructed before it happened.
+`ulo::Extension<T>` — the request-scoped DI view of one type in the [extension bag](#extensions), for code below the controller that would otherwise have the value threaded down through every signature. It holds the bag, not a copy, so a write from a guard is visible to a holder constructed before it happened.
 
 ```rust
 ext.set(value: T) -> Option<T>                      // returns what it replaced
@@ -945,12 +945,12 @@ Everything resolved against one value shares its cache — a request-scoped prov
 ### CheckedModule and StartupCheck
 
 ```rust
-// toni::CheckedModule — a DynamicModule carrying the StartupCheck its providers run
+// ulo::CheckedModule — a DynamicModule carrying the StartupCheck its providers run
 module.with_startup_check(check: StartupCheck) -> Self
 module.without_startup_check() -> Self        // start without contacting the dependency
 module.startup_check() -> Option<&StartupCheck>
 
-// toni::StartupCheck — retry schedule; default: 3 attempts, 2s apart, 5s per attempt
+// ulo::StartupCheck — retry schedule; default: 3 attempts, 2s apart, 5s per attempt
 StartupCheck::default().attempts(u32).delay(Duration).timeout(Duration)
 
 check.attempt_count() -> u32
@@ -960,7 +960,7 @@ check.worst_case() -> Duration          // the longest the check can take before
 check.run(probe, sleep) -> Result<(), String>   // async; probe once per attempt
 ```
 
-Database integrations' `for_root`-style constructors return `CheckedModule` rather than a bare `DynamicModule`, so a caller can weaken or drop the check without a second constructor. A failing check surfaces as `StartupError::HookFailed` from `ToniFactory::create`, naming the module. A `CheckedModule` works anywhere a module does, including as the root.
+Database integrations' `for_root`-style constructors return `CheckedModule` rather than a bare `DynamicModule`, so a caller can weaken or drop the check without a second constructor. A failing check surfaces as `StartupError::HookFailed` from `UloFactory::create`, naming the module. A `CheckedModule` works anywhere a module does, including as the root.
 
 A `DynamicModule` also works as the root module. Its [identity](#moduleidentity) is the builder id plus its providers' `ProviderFactory::identity_hint()` values: identical imports dedup, and two same-base modules with different hints are refused at startup, with an error printing both keys. Multi-instance modules implement `identity_hint` and offer named registration — see [Modules — identity and deduplication](/docs/core-concepts/modules#identity-and-deduplication).
 
@@ -970,9 +970,9 @@ Re-exported at the root for adapter crate authors: `HttpAdapter`, `WebSocketAdap
 
 Each transport's trait splits registration from socket acquisition: `register_route` / `register_ws_route` then `into_lifecycle(target, ctx)` on HTTP, `register_gateway` then `into_lifecycle_handles` on WebSocket, `register_handlers` then `into_lifecycle` on RPC and gRPC. `AdapterContext::execute` anchors at the adapter's outermost point, wrapping the entire native router — not inside matched-route handlers — which is what lets the global middleware chain observe unmatched paths and upgrades.
 
-`toni::traits_helpers::DispatchSource<T>` is how a dispatch target's instance is held — `Singleton(Arc<T>)` for one built at startup, `PerCall` for a target resolved inside the call being served — with `instance(ctx)` as the single resolution path. It appears in generated code rather than in applications; `request_scoped_dependencies` beside it is the scan that decides between the two.
+`ulo::traits_helpers::DispatchSource<T>` is how a dispatch target's instance is held — `Singleton(Arc<T>)` for one built at startup, `PerCall` for a target resolved inside the call being served — with `instance(ctx)` as the single resolution path. It appears in generated code rather than in applications; `request_scoped_dependencies` beside it is the scan that decides between the two.
 
-### toni::rpc::wire
+### ulo::rpc::wire
 
 The framing an RPC transport implements against, defined once so all seven speak the same grammar.
 
@@ -1000,13 +1000,13 @@ A frame outside the stream grammar is read the way `parse_response` reads it, so
 
 ## Dependency re-exports
 
-For macro-generated code and handler ergonomics, `toni` re-exports:
+For macro-generated code and handler ergonomics, `ulo` re-exports:
 
 ```rust
 pub use serde_json;                     // Body::json and error envelopes traffic in its Value
 pub use async_trait::async_trait;      // required on Guard/Interceptor/ErrorHandler impls
 pub use rustc_hash::FxHashMap;
-pub use toni_macros::*;                 // all macros, so `use toni::*` suffices
+pub use ulo_macros::*;                 // all macros, so `use ulo::*` suffices
 ```
 
 ## Feature flags
@@ -1017,17 +1017,17 @@ Gates the `tracing-subscriber` dependency behind the default tracing setup: `cre
 
 ### tower-compat
 
-Enables `toni::tower_compat` and the root re-export `toni::TowerLayer`.
+Enables `ulo::tower_compat` and the root re-export `ulo::TowerLayer`.
 
 ```toml title="Cargo.toml"
-toni = { version = "0.2", features = ["tower-compat"] }
+ulo = { version = "0.2", features = ["tower-compat"] }
 ```
 
 ```rust
 TowerLayer::new(layer: L) -> TowerLayer<L>   // implements Middleware
 ```
 
-Wraps a `tower::Layer` as toni middleware:
+Wraps a `tower::Layer` as ulo middleware:
 
 ```rust
 factory.use_global_middleware(Arc::new(TowerLayer::new(

@@ -10,7 +10,7 @@ RPC controllers are the microservice equivalent of HTTP controllers. They group 
 `#[controller]` goes on the struct — dependencies are `#[inject]` fields, exactly as with `#[injectable]`. A `#[patterns]` attribute on the impl block scans the handlers and names RPC as the transport. The DI constructor is marked `#[new]`:
 
 ```rust
-use toni::{controller, module, new, patterns};
+use ulo::{controller, module, new, patterns};
 
 #[controller]
 pub struct OrdersController {
@@ -59,7 +59,7 @@ A parameter of a type that is not a `FromContext<RpcContext>` fails to compile a
 The `Ok` side of the return can be `RpcData` (forwarded as-is) or any `Serialize` type (serialized into the reply):
 
 ```rust
-use toni::extractors::Payload;
+use ulo::extractors::Payload;
 
 #[derive(serde::Deserialize)]
 struct CreateOrderDto {
@@ -86,9 +86,9 @@ impl OrdersController {
     async fn create_order(
         &self,
         Payload(payload): Payload<CreateOrderDto>,
-    ) -> Result<OrderDto, toni::RpcError> {
+    ) -> Result<OrderDto, ulo::RpcError> {
         if payload.qty == 0 {
-            return Err(toni::RpcError::Internal("qty must be positive".into()));
+            return Err(ulo::RpcError::Internal("qty must be positive".into()));
         }
         Ok(self.service.create_order(&payload.item, payload.qty))
     }
@@ -100,7 +100,7 @@ An extraction that fails never reaches the handler: the failure becomes an `RpcE
 `Validated<Payload<T>>` runs `T`'s `#[validate]` rules after deserializing, so a handler that would otherwise open with a manual check takes the validated value directly:
 
 ```rust
-use toni::extractors::{Payload, Validated};
+use ulo::extractors::{Payload, Validated};
 
 #[derive(serde::Deserialize, validator::Validate)]
 struct CreateOrderDto {
@@ -114,7 +114,7 @@ struct CreateOrderDto {
 async fn create_order(
     &self,
     Validated(Payload(payload)): Validated<Payload<CreateOrderDto>>,
-) -> Result<OrderDto, toni::RpcError> {
+) -> Result<OrderDto, ulo::RpcError> {
     Ok(self.service.create_order(&payload.item, payload.qty))
 }
 ```
@@ -125,32 +125,32 @@ Taking `RpcData` instead hands the handler the raw payload, and returning `RpcDa
 #[message_pattern("order.create")]
 async fn create_order(
     &self,
-    data: toni::RpcData,
-    _ctx: &toni::RpcContext,
-) -> Result<toni::RpcData, toni::RpcError> {
+    data: ulo::RpcData,
+    _ctx: &ulo::RpcContext,
+) -> Result<ulo::RpcData, ulo::RpcError> {
     let payload = data
         .as_json()
-        .ok_or_else(|| toni::RpcError::Internal("expected JSON payload".into()))?;
+        .ok_or_else(|| ulo::RpcError::Internal("expected JSON payload".into()))?;
 
     let item = payload["item"].as_str().unwrap_or("unknown");
     let qty = payload["qty"].as_u64().unwrap_or(1) as u32;
 
-    Ok(toni::RpcData::json(self.service.create_order(item, qty)))
+    Ok(ulo::RpcData::json(self.service.create_order(item, qty)))
 }
 ```
 
 `Extensions` reads what an earlier stage attached — a guard's authenticated caller, an interceptor's tenant:
 
 ```rust
-use toni::context::Extensions;
-use toni::extractors::Payload;
+use ulo::context::Extensions;
+use ulo::extractors::Payload;
 
 #[message_pattern("order.create")]
 async fn create_order(
     &self,
     Payload(payload): Payload<CreateOrderDto>,
     ext: Extensions,
-) -> Result<OrderDto, toni::RpcError> {
+) -> Result<OrderDto, ulo::RpcError> {
     let caller = ext.get::<AuthenticatedUser>(); // attached by a guard
     Ok(self.service.create_order(&payload.item, payload.qty))
 }
@@ -163,13 +163,13 @@ async fn create_order(
 `#[event_pattern]` marks a handler for events with no reply. It must return `Result<(), RpcError>` — any other return type is a compile error:
 
 ```rust
-use toni::extractors::Payload;
+use ulo::extractors::Payload;
 
 #[event_pattern("order.shipped")]
 async fn on_order_shipped(
     &self,
     Payload(payload): Payload<ShipOrderDto>,
-) -> Result<(), toni::RpcError> {
+) -> Result<(), ulo::RpcError> {
     self.service.handle_shipment(payload.order_id);
     Ok(())
 }
@@ -183,13 +183,13 @@ A `#[message_pattern]` handler can answer with a sequence of frames instead of o
 
 ```rust
 use futures::StreamExt;
-use toni::rpc::{RpcHandlerOutput, RpcHandlerResult};
+use ulo::rpc::{RpcHandlerOutput, RpcHandlerResult};
 
 #[message_pattern("feed.count")]
-async fn count(&self, _d: toni::RpcData) -> RpcHandlerResult {
+async fn count(&self, _d: ulo::RpcData) -> RpcHandlerResult {
     Ok(RpcHandlerOutput::Stream(
         futures::stream::iter(
-            (1..=3).map(|n| Ok(toni::RpcData::json(serde_json::json!(n)))),
+            (1..=3).map(|n| Ok(ulo::RpcData::json(serde_json::json!(n)))),
         )
         .boxed(),
     ))
@@ -254,9 +254,9 @@ A producer that outlives the handler body — a spawned task feeding a channel �
 use std::time::Duration;
 
 use futures::StreamExt;
-use toni::context::HandlerContext;
-use toni::rpc::{RpcHandlerOutput, RpcHandlerResult};
-use toni::{RpcContext, RpcData, RpcError};
+use ulo::context::HandlerContext;
+use ulo::rpc::{RpcHandlerOutput, RpcHandlerResult};
+use ulo::{RpcContext, RpcData, RpcError};
 
 #[message_pattern("feed.ticks")]
 async fn ticks(&self, ctx: &RpcContext) -> RpcHandlerResult {
@@ -330,7 +330,7 @@ ctx.metadata()       // Option<&Metadata> — what #[set_metadata] declared on t
 
 Headers and metadata are distinct: `headers()` is what the caller sent with this call; `metadata()` is what the handler declared about itself. `#[set_metadata]` goes on the `#[patterns]` impl (every handler) or on an individual handler, and reads back through `ctx.metadata()` — typically from a guard.
 
-Enhancers share the same `&RpcContext`. `RpcContext` implements `HandlerContext`, and `extensions()`, `cache()`, `cancellation()` and `metadata()` work as on every context type — all four come from that trait, so reading them needs `use toni::context::HandlerContext;` in scope. `extensions()` is the per-call typed bag; it mutates through `&self`, so a guard can `ctx.extensions().insert(v)` for a later stage to read. An adapter that puts a value on the inbound call seeds the same bag, so what a transport attaches is readable from a guard, an interceptor and the handler alike.
+Enhancers share the same `&RpcContext`. `RpcContext` implements `HandlerContext`, and `extensions()`, `cache()`, `cancellation()` and `metadata()` work as on every context type — all four come from that trait, so reading them needs `use ulo::context::HandlerContext;` in scope. `extensions()` is the per-call typed bag; it mutates through `&self`, so a guard can `ctx.extensions().insert(v)` for a later stage to read. An adapter that puts a value on the inbound call seeds the same bag, so what a transport attaches is readable from a guard, an interceptor and the handler alike.
 
 Where headers travel on the wire is transport-specific: NATS headers, AMQP headers, MQTT v5 user properties, Kafka headers, a `metadata` field in the TCP/UDP frame, or the Redis request envelope. Each transport page states its mapping.
 
@@ -340,15 +340,15 @@ Where headers travel on the wire is transport-specific: NATS headers, AMQP heade
 RpcError::PatternNotFound(String)   // no handler matched the pattern
 RpcError::Forbidden(String)         // a guard rejected the message
 RpcError::Internal(String)          // generic server-side failure
-RpcError::AppError(Arc<dyn Error>)  // a domain error implementing toni::Error
+RpcError::AppError(Arc<dyn Error>)  // a domain error implementing ulo::Error
 ```
 
-`AppError` is not built by hand. Any type implementing `toni::Error` converts into `RpcError` via a blanket `From`, so domain errors lift with `?`. `#[derive(toni::Error)]` supplies the trait impl, with `#[error_kind(...)]` picking the `ErrorKind`; `Display` and `std::error::Error` impls are still required (a `thiserror` derive fits):
+`AppError` is not built by hand. Any type implementing `ulo::Error` converts into `RpcError` via a blanket `From`, so domain errors lift with `?`. `#[derive(ulo::Error)]` supplies the trait impl, with `#[error_kind(...)]` picking the `ErrorKind`; `Display` and `std::error::Error` impls are still required (a `thiserror` derive fits):
 
 ```rust
-use toni::extractors::Payload;
+use ulo::extractors::Payload;
 
-#[derive(Debug, toni::Error)]
+#[derive(Debug, ulo::Error)]
 enum OrderError {
     #[error_kind(NotFound)]
     Missing(u64),
@@ -368,7 +368,7 @@ impl std::error::Error for OrderError {}
 async fn get_order(
     &self,
     Payload(id): Payload<u64>,
-) -> Result<OrderDto, toni::RpcError> {
+) -> Result<OrderDto, ulo::RpcError> {
     let order = self.service.find(id).ok_or(OrderError::Missing(id))?;
     Ok(order)
 }
@@ -412,8 +412,8 @@ On the client, error frames surface as `RpcClientError::Remote { message, status
 Enhancers are plain `#[injectable]` providers implementing the typed traits — `Guard<RpcContext>`, `Interceptor<RpcContext, RpcHandlerResult>`, `ErrorHandler<RpcContext, RpcData>` — where `RpcHandlerResult = Result<RpcHandlerOutput, RpcError>` is what the transport answers with:
 
 ```rust
-use toni::traits_helpers::Guard;
-use toni::{async_trait, injectable, RpcContext};
+use ulo::traits_helpers::Guard;
+use ulo::{async_trait, injectable, RpcContext};
 
 #[injectable]
 pub struct ApiKeyGuard {}
@@ -432,7 +432,7 @@ An interceptor sees `RpcHandlerOutput::Stream` as an opaque variant. The executi
 Apply with `#[use_guards]` / `#[use_interceptors]` / `#[use_error_handlers]` — on the `#[patterns]` impl for every handler in the controller, or on an individual handler:
 
 ```rust
-use toni::extractors::Payload;
+use ulo::extractors::Payload;
 
 #[patterns]
 #[use_interceptors(RpcLoggingInterceptor)]   // controller-level
@@ -447,7 +447,7 @@ impl OrdersController {
     async fn create_order(
         &self,
         Payload(payload): Payload<CreateOrderDto>,
-    ) -> Result<OrderDto, toni::RpcError> {
+    ) -> Result<OrderDto, ulo::RpcError> {
         // ...
     }
 }
@@ -458,7 +458,7 @@ Enhancers are ordinary providers, so they go in the module's `providers` list �
 Global RPC enhancers register on the factory before the app is created:
 
 ```rust
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_rpc_guards(Arc::new(ApiKeyGuard {}));
 let mut app = factory.create_with(AppModule).await?;
 ```
@@ -470,8 +470,8 @@ let mut app = factory.create_with(AppModule).await?;
 To send messages from one service to another, inject an `RpcClient`. Construct it with any client transport and register it under a token:
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_nats::NatsClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_nats::NatsClientTransport;
 
 #[module(
     providers: [

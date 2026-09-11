@@ -24,7 +24,7 @@ impl UserController {
 #[module(controllers: [UserController], providers: [UserService])]
 impl AppModule {}`;
 
-const SERVE = `let mut app = ToniFactory::create(AppModule).await?;
+const SERVE = `let mut app = UloFactory::create(AppModule).await?;
 
 // The only line that names a server.
 app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000))?;
@@ -32,7 +32,7 @@ app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000))?;
 app.start().await?;`;
 
 /**
- * Attributes carry the meaning in a Toni file, so they are the only thing
+ * Attributes carry the meaning in a Ulo file, so they are the only thing
  * tinted. Matched by line rather than by a bracket-balancing regex, because
  * `#[module(controllers: [X], providers: [Y])]` nests brackets.
  */
@@ -95,11 +95,11 @@ function Section({
 }
 
 const ADAPTERS = [
-  { name: "toni-axum", on: "axum", note: "streaming bodies, WebSocket on either port" },
-  { name: "toni-actix", on: "actix-web", note: "buffered bodies, no WebSocket" },
-  { name: "toni-salvo", on: "salvo", note: "streaming bodies, WebSocket on either port" },
-  { name: "toni-poem", on: "poem", note: "streaming bodies, WebSocket on either port" },
-  { name: "toni-rocket", on: "rocket", note: "same-port WebSocket, binds its own socket" },
+  { name: "ulo-http-axum", on: "axum", note: "streaming bodies, WebSocket on either port" },
+  { name: "ulo-http-actix", on: "actix-web", note: "buffered bodies, no WebSocket" },
+  { name: "ulo-http-salvo", on: "salvo", note: "streaming bodies, WebSocket on either port" },
+  { name: "ulo-http-poem", on: "poem", note: "streaming bodies, WebSocket on either port" },
+  { name: "ulo-http-rocket", on: "rocket", note: "same-port WebSocket, binds its own socket" },
 ];
 
 const TRANSPORTS = [
@@ -125,7 +125,7 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-4xl px-6 pb-24">
       <header className="flex items-center justify-between py-6">
-        <span className="font-semibold tracking-tight text-brand">toni</span>
+        <span className="font-semibold tracking-tight text-brand">ulo</span>
         <nav className="flex items-center gap-5 text-sm text-fd-muted-foreground">
           <Link className="transition-colors hover:text-fd-foreground" href="/docs">
             Docs
@@ -138,7 +138,7 @@ export default function Home() {
           </Link>
           <a
             className="transition-colors hover:text-fd-foreground"
-            href="https://github.com/ifeanyi-ugwu/toni-rs"
+            href="https://github.com/ulo-rs/ulo"
           >
             GitHub
           </a>
@@ -150,7 +150,7 @@ export default function Home() {
           Structure for Rust services.
         </h1>
         <p className="max-w-[58ch] text-lg leading-relaxed text-fd-muted-foreground">
-          Toni organizes an application into modules, controllers, and injectable
+          Ulo organizes an application into modules, controllers, and injectable
           services, then runs every request through the same guard, interceptor,
           and pipe chain. It is not an HTTP server — you keep that choice.
         </p>
@@ -169,7 +169,7 @@ export default function Home() {
             Coming from NestJS
           </Link>
           <code className="rounded-lg border bg-fd-card px-3 py-2 font-mono text-sm text-fd-muted-foreground">
-            cargo add toni toni-axum
+            cargo add ulo ulo-http-axum
           </code>
         </div>
       </section>
@@ -225,7 +225,7 @@ export default function Home() {
             ["Configuration", "typed config from env or file, validated at load"],
             ["Health checks", "HTTP, memory, and disk indicators behind one endpoint"],
             ["GraphQL", "async-graphql or juniper, with WebSocket subscriptions"],
-            ["CLI", "toni new, toni generate resource, and a watching toni dev"],
+            ["CLI", "ulo new, ulo generate resource, and a watching ulo dev"],
             ["Lifecycle", "init and shutdown hooks, and a graceful drain you control"],
           ].map(([name, detail]) => (
             <div key={name} className="flex flex-col gap-0.5 border-t pt-3">

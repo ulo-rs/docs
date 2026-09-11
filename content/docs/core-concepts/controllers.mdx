@@ -8,7 +8,7 @@ A controller is a struct annotated with `#[controller("/prefix")]` that groups r
 ## Defining a controller
 
 ```rust
-use toni::{controller, get, routes, Body};
+use ulo::{controller, get, routes, Body};
 
 #[controller("/cats")]
 pub struct CatsController;
@@ -32,7 +32,7 @@ All method paths are relative to the prefix: `#[get("/")]` matches `GET /cats`, 
 Path syntax, in brief:
 
 - `{param}` is the canonical parameter syntax on every adapter.
-- Express-style `:param` is a compile error: ``route path segment `:id` uses `:param` syntax; toni's parameter syntax is `{id}` ``.
+- Express-style `:param` is a compile error: ``route path segment `:id` uses `:param` syntax; ulo's parameter syntax is `{id}` ``.
 - A colon later in a segment is a legal literal character: `/users/{id}:activate` works.
 - Trailing slashes are insignificant — `#[get("/x/")]` declares the same route as `#[get("/x")]`, and two routes differing only by a trailing slash are refused as duplicates at bind.
 
@@ -68,7 +68,7 @@ Handlers can be sync or `async`. Beyond the four verbs, `#[sse("/path")]` declar
 
 <FromNest>
 `@Controller('users')` becomes `#[controller("/users")]`, but the handlers do not
-move with it. A NestJS controller holds its routes in the class body; a Toni
+move with it. A NestJS controller holds its routes in the class body; a Ulo
 controller holds only its injected dependencies, and the handlers live in a
 second `impl` block marked `#[routes]`. A `#[get]` on a plain `impl` is not
 scanned, and the route never registers.
@@ -81,8 +81,8 @@ Path parameters are written `{id}`. The `:id` form is a compile error.
 Use extractors to pull data out of requests as handler parameters:
 
 ```rust
-use toni::HttpError;
-use toni::extractors::{Path, Query, Json};
+use ulo::HttpError;
+use ulo::extractors::{Path, Query, Json};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -179,7 +179,7 @@ fn teapot(&self) -> Result<Body, HttpError> {
 }
 ```
 
-Domain error types implementing `toni::Error` are lifted into the HTTP error envelope automatically when returned through `Result`.
+Domain error types implementing `ulo::Error` are lifted into the HTTP error envelope automatically when returned through `Result`.
 
 ## Guards on controllers
 
@@ -201,7 +201,7 @@ impl AdminController {
 A guard is a provider implementing `Guard<HttpContext>`:
 
 ```rust
-use toni::{async_trait, context::HttpContext, traits_helpers::Guard};
+use ulo::{async_trait, context::HttpContext, traits_helpers::Guard};
 
 pub struct AuthGuard;
 
@@ -239,7 +239,7 @@ impl PostsController {
 Inside a guard, metadata comes from the context's `metadata()`:
 
 ```rust
-use toni::{async_trait, context::{HandlerContext, HttpContext}, traits_helpers::Guard};
+use ulo::{async_trait, context::{HandlerContext, HttpContext}, traits_helpers::Guard};
 
 #[async_trait]
 impl Guard<HttpContext> for RolesGuard {

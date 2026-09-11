@@ -1,9 +1,9 @@
 ---
 title: SeaORM
-description: Integrating SeaORM with Toni's module system for managed database connections.
+description: Integrating SeaORM with Ulo's module system for managed database connections.
 ---
 
-`toni-seaorm` provides a `SeaOrmModule` that connects to a database at startup and makes `DatabaseConnection` available to any provider in the application via the global DI scope.
+`ulo-db-seaorm` provides a `SeaOrmModule` that connects to a database at startup and makes `DatabaseConnection` available to any provider in the application via the global DI scope.
 
 `for_root` is called once, in the root module. Feature modules inject `DatabaseConnection` without importing `SeaOrmModule` themselves.
 
@@ -13,8 +13,8 @@ Add the dependency:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-seaorm = "0.1"
+ulo = "0.2"
+ulo-db-seaorm = "0.1"
 sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 ```
 
@@ -23,7 +23,7 @@ sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls"] 
 Call `SeaOrmModule::for_root` in your root module's `imports`:
 
 ```rust
-use toni_seaorm::SeaOrmModule;
+use ulo_db_seaorm::SeaOrmModule;
 
 #[module(
     imports: [
@@ -37,14 +37,14 @@ pub struct AppModule;
 
 `for_root` returns a **global** `CheckedModule` — a `DynamicModule` carrying a configurable startup check. It works anywhere a module does: as an import or as the root module.
 
-The connection object itself is constructed lazily, without dialing. What verifies the database is the [startup check](#startup-check): it probes the server in `on_module_init`, so a bad URL or unreachable host surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create` — naming the module, with any password in the connection URL redacted (`postgres://user:***@localhost/mydb`) — rather than on the first query.
+The connection object itself is constructed lazily, without dialing. What verifies the database is the [startup check](#startup-check): it probes the server in `on_module_init`, so a bad URL or unreachable host surfaces as `Err(StartupError::HookFailed)` from `UloFactory::create` — naming the module, with any password in the connection URL redacted (`postgres://user:***@localhost/mydb`) — rather than on the first query.
 
 ## Startup check
 
 By default the module confirms the database answers before the application starts: 3 attempts, 2 seconds apart, each bounded to 5 seconds — worst case ≈ 19 s. Tune the schedule with `with_startup_check`:
 
 ```rust
-use toni::StartupCheck;
+use ulo::StartupCheck;
 
 SeaOrmModule::for_root(url)
     .with_startup_check(StartupCheck::default().attempts(5))
@@ -112,7 +112,7 @@ Names are global identifiers — two connections cannot share one, even across d
 
 ## Using env vars
 
-Combine with `toni-config` or `std::env::var` to avoid hardcoding credentials:
+Combine with `ulo-config` or `std::env::var` to avoid hardcoding credentials:
 
 ```rust
 #[module(
@@ -126,7 +126,7 @@ pub struct AppModule;
 Or with a typed config. A module is not a provider — it can't be produced by a factory at injection time, so the URL must be known when the module tree is built. Load the config first, then pass the value to `for_root`:
 
 ```rust
-use toni_config::{Config, ConfigModule};
+use ulo_config::{Config, ConfigModule};
 
 #[derive(Config, Clone)]
 pub struct AppConfig {
@@ -134,7 +134,7 @@ pub struct AppConfig {
     pub database_url: String,
 }
 
-fn database_module() -> toni::CheckedModule {
+fn database_module() -> ulo::CheckedModule {
     let config = ConfigModule::<AppConfig>::from_env()
         .expect("invalid configuration");
     SeaOrmModule::for_root(config.get_ref().database_url.clone())
@@ -152,12 +152,12 @@ pub struct AppModule;
 
 ## Health checks
 
-Enable the `health` feature to have `for_root` also register a `SeaOrmHealthIndicator`, which exposes `ping_check(key)` for use with `toni-terminus`. The indicator shares the registered connection — enabling `health` opens no second pool — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
+Enable the `health` feature to have `for_root` also register a `SeaOrmHealthIndicator`, which exposes `ping_check(key)` for use with `ulo-health`. The indicator shares the registered connection — enabling `health` opens no second pool — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
 
 ## API reference
 
 ```rust
-use toni_seaorm::SeaOrmModule;
+use ulo_db_seaorm::SeaOrmModule;
 
 SeaOrmModule::for_root(url: impl Into<String>) -> CheckedModule
 SeaOrmModule::for_root_named(name: impl Into<String>, url: impl Into<String>) -> CheckedModule

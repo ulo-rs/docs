@@ -1,28 +1,28 @@
 ---
 title: Axum Adapter
-description: Using the toni-axum adapter — setup, WebSocket support, streaming, graceful shutdown, and Tower layers.
+description: Using the ulo-http-axum adapter — setup, WebSocket support, streaming, graceful shutdown, and Tower layers.
 ---
 
-The `toni-axum` crate wraps [Axum](https://github.com/tokio-rs/axum) 0.8 to handle HTTP for Toni applications. It implements both `HttpAdapter` and `WebSocketAdapter`, streams bodies in both directions, and is the recommended choice for most applications.
+The `ulo-http-axum` crate wraps [Axum](https://github.com/tokio-rs/axum) 0.8 to handle HTTP for Ulo applications. It implements both `HttpAdapter` and `WebSocketAdapter`, streams bodies in both directions, and is the recommended choice for most applications.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-axum = "0.1"
+ulo = "0.2"
+ulo-http-axum = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ## Basic setup
 
 ```rust
-use toni::*;
-use toni_axum::AxumAdapter;
+use ulo::*;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await?;
     Ok(())
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
 `use_http_adapter` registers all routes from the module tree onto the adapter. `start()` binds the socket and serves until shutdown; bind failures (port in use) surface as the returned error.
 
-Toni's `{param}` path syntax matches Axum's, so routes mount unchanged. An unmatched path hits a fallback that returns Toni's standard 404 envelope. A method mismatch is answered by Axum's own router instead — an empty body with an `Allow` header, not the Toni envelope that `toni-actix`, `toni-salvo`, and `toni-rocket` build for a 405. The global middleware chain runs on both.
+Ulo's `{param}` path syntax matches Axum's, so routes mount unchanged. An unmatched path hits a fallback that returns Ulo's standard 404 envelope. A method mismatch is answered by Axum's own router instead — an empty body with an `Allow` header, not the Ulo envelope that `ulo-http-actix`, `ulo-http-salvo`, and `ulo-http-rocket` build for a 405. The global middleware chain runs on both.
 
 ## Global enhancers
 
@@ -39,12 +39,12 @@ Global middleware, guards, and error handlers are registered on the factory befo
 
 ```rust
 use std::sync::Arc;
-use toni::*;
-use toni_axum::AxumAdapter;
+use ulo::*;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut factory = ToniFactory::new();
+    let mut factory = UloFactory::new();
     factory
         .use_global_middleware(Arc::new(LoggerMiddleware))
         .use_global_http_guards(Arc::new(ThrottleGuard::default()))
@@ -63,7 +63,7 @@ Guards, interceptors, and error handlers are registered per transport (`use_glob
 
 Both directions stream:
 
-- **Requests** are handed to Toni as a stream — the `BodyStream` extractor sees frames as they arrive; `Bytes`, `Json`, and friends collect on demand.
+- **Requests** are handed to Ulo as a stream — the `BodyStream` extractor sees frames as they arrive; `Bytes`, `Json`, and friends collect on demand.
 - **Responses** built with `Body::stream(...)` reach the client chunk by chunk, so [SSE](/docs/techniques/sse) and long-lived streaming responses work without buffering.
 
 ## WebSocket support
@@ -71,7 +71,7 @@ Both directions stream:
 Same-port gateways (`#[websocket_gateway("/path")]`) are wired onto the HTTP listener automatically — registering the HTTP adapter is enough:
 
 ```rust
-let mut app = ToniFactory::new().create_with(AppModule).await?;
+let mut app = UloFactory::new().create_with(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await?;
 ```
@@ -87,24 +87,24 @@ Sub-protocols are negotiated by echoing the first protocol the client offers in 
 
 ## Graceful shutdown
 
-The adapter forwards Toni's shutdown signal to Axum's `with_graceful_shutdown`, so in-flight requests drain before the serve loop exits. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
+The adapter forwards Ulo's shutdown signal to Axum's `with_graceful_shutdown`, so in-flight requests drain before the serve loop exits. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
 
 If the serve loop fails after a successful bind, the adapter logs the error and the serve future returns — which the framework treats as a shutdown signal, closing the whole application through the same graceful drain. No process exit is involved.
 
 ## Tower layers
 
-Any [`tower::Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) can run as Toni middleware via `TowerLayer`. This requires the `tower-compat` feature on `toni`:
+Any [`tower::Layer`](https://docs.rs/tower/latest/tower/trait.Layer.html) can run as Ulo middleware via `TowerLayer`. This requires the `tower-compat` feature on `ulo`:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = { version = "0.2", features = ["tower-compat"] }
+ulo = { version = "0.2", features = ["tower-compat"] }
 ```
 
 Register globally, or scope to routes in a module's `configure_middleware` — `apply_tower(layer)` is sugar for `apply(TowerLayer::new(layer))`:
 
 ```rust
 use std::sync::Arc;
-use toni::tower_compat::TowerLayer;
+use ulo::tower_compat::TowerLayer;
 use tower_http::trace::TraceLayer;
 
 // Global — every request
@@ -119,12 +119,12 @@ fn configure_middleware(&self, consumer: &mut MiddlewareConsumer) {
 ```
 
 <Callout type="warn">
-`TowerLayer` is Toni middleware, not an Axum feature — the same registration works on every HTTP adapter. One limitation: layers that call the inner service more than once (`tower::retry`, `tower::hedge`) panic at runtime; use an interceptor for retry logic.
+`TowerLayer` is Ulo middleware, not an Axum feature — the same registration works on every HTTP adapter. One limitation: layers that call the inner service more than once (`tower::retry`, `tower::hedge`) panic at runtime; use an interceptor for retry logic.
 </Callout>
 
 ## Runtime tuning
 
-`toni-axum` delegates threading to Tokio. For worker-thread counts and other runtime settings, build the runtime explicitly:
+`ulo-http-axum` delegates threading to Tokio. For worker-thread counts and other runtime settings, build the runtime explicitly:
 
 ```rust
 fn main() -> anyhow::Result<()> {
@@ -134,7 +134,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(async {
-            let mut app = ToniFactory::new().create_with(AppModule).await?;
+            let mut app = UloFactory::new().create_with(AppModule).await?;
             app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000)).unwrap();
             app.start().await
         })

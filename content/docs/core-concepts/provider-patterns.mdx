@@ -3,7 +3,7 @@ title: Provider Patterns
 description: Value providers, factory providers, alias providers, and token providers — all the ways to put things into the DI container.
 ---
 
-Beyond plain injectable services, Toni supports several provider patterns for registering non-struct values, computed results, async-initialized resources, and alternate names for existing providers.
+Beyond plain injectable services, Ulo supports several provider patterns for registering non-struct values, computed results, async-initialized resources, and alternate names for existing providers.
 
 ## Service providers (the default)
 
@@ -81,7 +81,7 @@ Run a closure to produce a value, with optional dependencies:
 pub struct AppModule;
 ```
 
-Dependencies listed in the closure signature are resolved from the module's DI scope before the factory runs. The value the factory produces must be `Clone`, for the reason a value provider's must: the container runs the closure once at startup and clones the result into every injection site. A non-`Clone` product fails with ``the trait bound `Logger: Clone` is not satisfied``, pointed at the whole macro call and offering a `help:` that names a generated `__ToniFactoryProvider_*` type rather than the fix — which is to produce an `Arc<Logger>`.
+Dependencies listed in the closure signature are resolved from the module's DI scope before the factory runs. The value the factory produces must be `Clone`, for the reason a value provider's must: the container runs the closure once at startup and clones the result into every injection site. A non-`Clone` product fails with ``the trait bound `Logger: Clone` is not satisfied``, pointed at the whole macro call and offering a `help:` that names a generated `__UloFactoryProvider_*` type rather than the fix — which is to produce an `Arc<Logger>`.
 
 A scope changes that, and goes after the closure:
 
@@ -212,8 +212,8 @@ The split is between building and answering. A **`ProviderFactory`** runs once d
 use std::any::Any;
 use std::sync::Arc;
 
-use toni::{FxHashMap, async_trait};
-use toni::traits_helpers::{Injectable, Provider, ProviderContext, ProviderFactory};
+use ulo::{FxHashMap, async_trait};
+use ulo::traits_helpers::{Injectable, Provider, ProviderContext, ProviderFactory};
 
 pub struct DbUrlFactory {
     url: String,

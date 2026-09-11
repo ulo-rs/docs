@@ -3,7 +3,7 @@ title: Lifecycle Hooks
 description: Run code at specific points in the application and module lifecycle — initialization, startup, and shutdown.
 ---
 
-Lifecycle hooks are methods on providers, controllers, and modules that Toni calls at specific points during application startup and shutdown. They're declared with attribute macros inside `impl` blocks. All hooks are `async fn` taking `&self`; the two startup hooks return `toni::InitResult`, and returning `Err` aborts startup. The two fail from different phases: an `on_module_init` failure surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create`, an `on_application_bootstrap` failure from `bind()`.
+Lifecycle hooks are methods on providers, controllers, and modules that Ulo calls at specific points during application startup and shutdown. They're declared with attribute macros inside `impl` blocks. All hooks are `async fn` taking `&self`; the two startup hooks return `ulo::InitResult`, and returning `Err` aborts startup. The two fail from different phases: an `on_module_init` failure surfaces as `Err(StartupError::HookFailed)` from `UloFactory::create`, an `on_application_bootstrap` failure from `bind()`.
 
 <Callout type="warn">
 Hooks fire only on **singleton** providers. Request- and transient-scoped instances do not exist at application init or shutdown, so there is no firing point for one. Declared on such a provider a hook compiles and is never called — the only signal is a `dead_code` warning on the method.
@@ -13,7 +13,7 @@ Hooks fire only on **singleton** providers. Request- and transient-scoped instan
 
 ### `#[on_module_init]`
 
-`async fn(&self) -> toni::InitResult`. Runs after the DI container is fully initialized, before the application starts accepting requests. Use it for setup that requires dependencies to be ready.
+`async fn(&self) -> ulo::InitResult`. Runs after the DI container is fully initialized, before the application starts accepting requests. Use it for setup that requires dependencies to be ready.
 
 ```rust
 #[injectable]
@@ -27,7 +27,7 @@ impl DatabaseService {
     }
 
     #[on_module_init]
-    async fn connect(&self) -> toni::InitResult {
+    async fn connect(&self) -> ulo::InitResult {
         println!("connecting to {}", self.name);
         // establish connections, warm caches...
         Ok(())
@@ -37,11 +37,11 @@ impl DatabaseService {
 
 ### `#[on_application_bootstrap]`
 
-`async fn(&self) -> toni::InitResult`. Runs after all modules have initialized (all `on_module_init` hooks complete), the last hook before the server accepts connections.
+`async fn(&self) -> ulo::InitResult`. Runs after all modules have initialized (all `on_module_init` hooks complete), the last hook before the server accepts connections.
 
 ```rust
 #[on_application_bootstrap]
-async fn on_ready(&self) -> toni::InitResult {
+async fn on_ready(&self) -> ulo::InitResult {
     println!("ready to serve requests");
     Ok(())
 }
@@ -114,14 +114,14 @@ impl CacheService {
     }
 
     #[on_module_init]
-    async fn connect(&self) -> toni::InitResult {
+    async fn connect(&self) -> ulo::InitResult {
         println!("cache: connecting...");
         self.connected.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
     #[on_application_bootstrap]
-    async fn warm_up(&self) -> toni::InitResult {
+    async fn warm_up(&self) -> ulo::InitResult {
         println!("cache: warming up hot keys");
         Ok(())
     }
@@ -146,7 +146,7 @@ Modules take the same hooks with the same shapes. Use the `#[module]` attribute 
 #[module(providers: [CacheService])]
 impl CacheModule {
     #[on_module_init]
-    async fn init(&self) -> toni::InitResult {
+    async fn init(&self) -> ulo::InitResult {
         println!("CacheModule initialized");
         Ok(())
     }
@@ -163,10 +163,10 @@ Controllers accept the same hooks inside their impl blocks. On a request-scoped 
 ## Triggering shutdown
 
 <Callout type="warn" title="Nothing runs these hooks unless you wire a signal">
-Toni installs no SIGTERM/SIGINT handlers. Wire signals to a `ShutdownHandle`:
+Ulo installs no SIGTERM/SIGINT handlers. Wire signals to a `ShutdownHandle`:
 
 ```rust
-let mut app = ToniFactory::new().create_with(AppModule).await?;
+let mut app = UloFactory::new().create_with(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000))?;
 app.bind().await?;
 
@@ -184,16 +184,16 @@ app.run().await; // drains in-flight requests, then runs the shutdown hooks
 
 <FromNest>
 NestJS starts running these on SIGTERM once `enableShutdownHooks()` is called.
-Toni installs no signal handlers at all. Nothing triggers the shutdown hooks on
+Ulo installs no signal handlers at all. Nothing triggers the shutdown hooks on
 Ctrl-C unless you wire a signal to a `ShutdownHandle` yourself.
 </FromNest>
 
 ## Standalone context
 
-`ToniFactory::create_application_context` (for CLI tools, workers) runs the same startup hooks, including bootstrap — a failing bootstrap hook propagates as `Err(StartupError::HookFailed)` from it, since a standalone context has no `bind()` to fail from. Call `close()` to trigger the shutdown sequence:
+`UloFactory::create_application_context` (for CLI tools, workers) runs the same startup hooks, including bootstrap — a failing bootstrap hook propagates as `Err(StartupError::HookFailed)` from it, since a standalone context has no `bind()` to fail from. Call `close()` to trigger the shutdown sequence:
 
 ```rust
-let mut ctx = ToniFactory::new()
+let mut ctx = UloFactory::new()
     .create_application_context_with(AppModule)
     .await?;
 

@@ -1,35 +1,35 @@
 ---
 title: Salvo Adapter
-description: Using the toni-salvo adapter — setup, WebSocket support, streaming, graceful shutdown, and the TRACE/CONNECT quirk.
+description: Using the ulo-http-salvo adapter — setup, WebSocket support, streaming, graceful shutdown, and the TRACE/CONNECT quirk.
 ---
 
-The `toni-salvo` crate wraps [Salvo](https://salvo.rs) 0.92 to handle HTTP for Toni applications. It implements both `HttpAdapter` and `WebSocketAdapter`, so a single adapter type covers HTTP routes, same-port WebSocket upgrades, and separate-port WebSocket servers. Bodies stream in both directions.
+The `ulo-http-salvo` crate wraps [Salvo](https://salvo.rs) 0.92 to handle HTTP for Ulo applications. It implements both `HttpAdapter` and `WebSocketAdapter`, so a single adapter type covers HTTP routes, same-port WebSocket upgrades, and separate-port WebSocket servers. Bodies stream in both directions.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-salvo = "0.1"
+ulo = "0.2"
+ulo-http-salvo = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ## Basic setup
 
 ```rust
-use toni::*;
-use toni_salvo::SalvoAdapter;
+use ulo::*;
+use ulo_http_salvo::SalvoAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(SalvoAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await?;
     Ok(())
 }
 ```
 
-Toni and Salvo share `{param}` path syntax, so routes mount unchanged. A catch-all at `{**rest}` returns Toni's standard 404 envelope for unmatched paths, with the global middleware chain applied.
+Ulo and Salvo share `{param}` path syntax, so routes mount unchanged. A catch-all at `{**rest}` returns Ulo's standard 404 envelope for unmatched paths, with the global middleware chain applied.
 
 ## WebSocket support
 
@@ -49,7 +49,7 @@ app.use_websocket_adapter(SalvoAdapter::new()).unwrap();
 
 ## Graceful shutdown
 
-The adapter forwards Toni's shutdown signal to `salvo::Server::handle().stop_graceful(None)`. The HTTP server and every separate-port WebSocket listener stop in response to a single signal. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
+The adapter forwards Ulo's shutdown signal to `salvo::Server::handle().stop_graceful(None)`. The HTTP server and every separate-port WebSocket listener stop in response to a single signal. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
 
 ## TRACE and CONNECT quirk
 

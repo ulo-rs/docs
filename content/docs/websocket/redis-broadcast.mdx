@@ -1,9 +1,9 @@
 ---
 title: Redis Broadcast
-description: Scale WebSocket broadcasts across multiple processes with toni-redis-broadcast.
+description: Scale WebSocket broadcasts across multiple processes with ulo-ws-redis.
 ---
 
-`toni-redis-broadcast` replaces the in-process `BroadcastModule` with a Redis-backed broadcaster. Every `send()` call publishes to a Redis Pub/Sub channel; a background subscriber loop on each process delivers messages to locally connected clients.
+`ulo-ws-redis` replaces the in-process `BroadcastModule` with a Redis-backed broadcaster. Every `send()` call publishes to a Redis Pub/Sub channel; a background subscriber loop on each process delivers messages to locally connected clients.
 
 Use this when running multiple instances of the same service and needing clients on different processes to receive the same WebSocket messages.
 
@@ -11,8 +11,8 @@ Use this when running multiple instances of the same service and needing clients
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-redis-broadcast = "0.1"
+ulo = "0.2"
+ulo-ws-redis = "0.1"
 ```
 
 ## Setup
@@ -20,7 +20,7 @@ toni-redis-broadcast = "0.1"
 Replace `BroadcastModule::new()` with `RedisBroadcastModule::for_root(url)` in your module:
 
 ```rust
-use toni_redis_broadcast::RedisBroadcastModule;
+use ulo_ws_redis::RedisBroadcastModule;
 
 #[module(
     imports: [RedisBroadcastModule::for_root("redis://127.0.0.1:6379")],
@@ -36,10 +36,10 @@ pub struct AppModule;
 Inject `RedisBroadcastService` anywhere you need to push messages across processes:
 
 ```rust
-use toni_redis_broadcast::RedisBroadcastService;
-use toni::websocket::{WsClient, WsError, WsHandlerOutput, WsMessage};
-use toni::WsHandlerResult;
-use toni::{new, subscriptions, websocket_gateway};
+use ulo_ws_redis::RedisBroadcastService;
+use ulo::websocket::{WsClient, WsError, WsHandlerOutput, WsMessage};
+use ulo::WsHandlerResult;
+use ulo::{new, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway {
@@ -103,11 +103,11 @@ Room membership is stored in Redis sets, so every process sees the same membersh
 
 | Key | Holds |
 |---|---|
-| `toni:rooms:{room}` | the client ids in that room; a client's own id doubles as its auto-room |
-| `toni:client:{id}:rooms` | the rooms one client is in |
-| `toni:client:{id}:process` | which process that client is connected to |
-| `toni:broadcast` | the Pub/Sub channel every process subscribes to — the fan-out path for `to_all`, `to_room` and `except` |
-| `toni:broadcast:{process_id}` | one process's own Pub/Sub channel; `to_client` publishes straight here when the affinity key names the process, skipping the global fan-out |
+| `ulo:rooms:{room}` | the client ids in that room; a client's own id doubles as its auto-room |
+| `ulo:client:{id}:rooms` | the rooms one client is in |
+| `ulo:client:{id}:process` | which process that client is connected to |
+| `ulo:broadcast` | the Pub/Sub channel every process subscribes to — the fan-out path for `to_all`, `to_room` and `except` |
+| `ulo:broadcast:{process_id}` | one process's own Pub/Sub channel; `to_client` publishes straight here when the affinity key names the process, skipping the global fan-out |
 
 
 

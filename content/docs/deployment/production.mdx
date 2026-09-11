@@ -1,6 +1,6 @@
 ---
 title: Production Build
-description: Building and running Toni applications in production.
+description: Building and running Ulo applications in production.
 ---
 
 ## Release build
@@ -35,7 +35,7 @@ PORT=8080
 
 ## Graceful shutdown
 
-Toni installs **no** signal handlers. A container runtime or systemd stops a process by sending SIGTERM and waiting; with nothing listening for it, the process is killed with requests in flight and the shutdown hooks never run.
+Ulo installs **no** signal handlers. A container runtime or systemd stops a process by sending SIGTERM and waiting; with nothing listening for it, the process is killed with requests in flight and the shutdown hooks never run.
 
 Wire it by taking a `ShutdownHandle` after `bind()` and calling `shutdown()` from a task that waits on the signal:
 
@@ -59,7 +59,7 @@ app.run().await;
 
 On the shutdown signal, `run()` closes the adapters first so in-flight requests drain, then runs the shutdown hooks in order: `on_module_destroy` → `before_application_shutdown` → `on_application_shutdown`. `ShutdownHandle` is cloneable and `shutdown()` is idempotent, so any task can trigger it.
 
-[Graceful shutdown](/docs/techniques/graceful-shutdown) covers the wiring in full — catching SIGINT and Windows Ctrl+C from the same task, and the rest of `ShutdownHandle`. The runnable version is [`examples/graceful_shutdown.rs`](https://github.com/ifeanyi-ugwu/toni-rs/blob/master/examples/graceful_shutdown.rs).
+[Graceful shutdown](/docs/techniques/graceful-shutdown) covers the wiring in full — catching SIGINT and Windows Ctrl+C from the same task, and the rest of `ShutdownHandle`. The runnable version is [`examples/graceful_shutdown.rs`](https://github.com/ulo-rs/ulo/blob/master/examples/graceful_shutdown.rs).
 
 ## Listening on all interfaces
 
@@ -93,7 +93,7 @@ A basic systemd unit file:
 
 ```ini
 [Unit]
-Description=My Toni API
+Description=My Ulo API
 After=network.target
 
 [Service]
@@ -141,7 +141,7 @@ systemd announces the inherited socket through `LISTEN_FDS`, which the framework
 
 ```rust
 use listenfd::ListenFd;
-use toni::BindTarget;
+use ulo::BindTarget;
 
 /// Take the inherited socket if there is one, otherwise bind normally.
 fn http_target() -> anyhow::Result<BindTarget> {
@@ -152,12 +152,12 @@ fn http_target() -> anyhow::Result<BindTarget> {
     }
 }
 
-let mut app = ToniFactory::new().create_with(AppModule).await?;
+let mut app = UloFactory::new().create_with(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), http_target()?)?;
 app.start().await?;
 ```
 
-`toni dev --listen` announces its socket over the same protocol, so this adoption code serves development and production unchanged — see the [development workflow](/docs/getting-started/development-workflow). All HTTP adapters accept a pre-bound listener except rocket, which refuses it at `bind()`. See [Bind targets](/docs/techniques/bind-targets) for the full `BindTarget` API.
+`ulo dev --listen` announces its socket over the same protocol, so this adoption code serves development and production unchanged — see the [development workflow](/docs/getting-started/development-workflow). All HTTP adapters accept a pre-bound listener except rocket, which refuses it at `bind()`. See [Bind targets](/docs/techniques/bind-targets) for the full `BindTarget` API.
 
 ## Performance tuning (Axum / Tokio)
 
@@ -169,7 +169,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(async {
-            let mut app = ToniFactory::new().create_with(AppModule).await?;
+            let mut app = UloFactory::new().create_with(AppModule).await?;
             app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 8080)).unwrap();
             app.start().await
         })
@@ -183,7 +183,7 @@ num_cpus = "1"
 
 ## Reverse proxy (nginx)
 
-Run the Toni server on a local port and proxy from nginx:
+Run the Ulo server on a local port and proxy from nginx:
 
 ```nginx
 server {

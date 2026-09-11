@@ -40,7 +40,7 @@ gRPC payloads are method-typed protobuf messages and can't sit in a non-generic 
 | `peer()` | `Option<SocketAddr>` |
 | `deadline()` | `Option<Instant>` — when the caller stops waiting |
 
-Only ASCII metadata is captured into `headers()`; binary (`-bin`) entries are skipped, and a handler that needs them takes `toni_grpc::GrpcRequest<T>` and reads tonic's own map. `GrpcContext` also implements `HandlerContext`, so `metadata()`, `extensions()`, `cache()`, `cancellation()`, and `deadline()` work as on the other transports.
+Only ASCII metadata is captured into `headers()`; binary (`-bin`) entries are skipped, and a handler that needs them takes `ulo_grpc::GrpcRequest<T>` and reads tonic's own map. `GrpcContext` also implements `HandlerContext`, so `metadata()`, `extensions()`, `cache()`, `cancellation()`, and `deadline()` work as on the other transports.
 
 `deadline()` is read from the caller's `grpc-timeout` at the start of the call, so every stage sees the same instant rather than each recomputing from a clock that has moved. gRPC is the only transport whose wire carries how long the caller intends to wait; the other three answer `None`. It reports — tonic is what enforces the deadline — so a guard can refuse work it cannot finish in time, and a handler can budget against the caller's patience instead of a number it picked.
 
@@ -68,23 +68,23 @@ async fn create(
 
 It is one bag per execution, not one per parameter, which is why what the guard wrote is there.
 
-`GrpcContext::of(request.extensions())` and `Extensions::adopt(request.extensions())` read the same things off a `tonic::Request`. They are for a service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services), outside toni's dispatch — a `#[grpc_methods]` handler asks for what it needs by parameter.
+`GrpcContext::of(request.extensions())` and `Extensions::adopt(request.extensions())` read the same things off a `tonic::Request`. They are for a service written against tonic's own trait and registered through [`GrpcAdapter::add_service`](/docs/grpc/operations#mixing-di-and-plain-tonic-services), outside ulo's dispatch — a `#[grpc_methods]` handler asks for what it needs by parameter.
 
-Note the naming split: `#[use_*]` attributes and the per-method enhancer maps key on the bare Rust method name (`create`), while `ctx.method()` and the tracing span's `pattern` field both carry the wire path (`"toni_examples.orders.Orders/Create"`).
+Note the naming split: `#[use_*]` attributes and the per-method enhancer maps key on the bare Rust method name (`create`), while `ctx.method()` and the tracing span's `pattern` field both carry the wire path (`"ulo_examples.orders.Orders/Create"`).
 
 ## Guards
 
 A guard implements `Guard<GrpcContext>`:
 
 ```rust
-use toni::GrpcContext;
-use toni::traits_helpers::Guard;
+use ulo::GrpcContext;
+use ulo::traits_helpers::Guard;
 
 #[injectable]
 pub struct AuthGuard {}
 impl AuthGuard {}
 
-#[toni::async_trait]
+#[ulo::async_trait]
 impl Guard<GrpcContext> for AuthGuard {
     async fn can_activate(&self, ctx: &GrpcContext) -> bool {
         matches!(ctx.header("authorization"), Some("Bearer secret-token"))
@@ -103,14 +103,14 @@ A guard cannot read the message. The request is installed on the execution by th
 An interceptor implements `Interceptor<GrpcContext, GrpcHandlerResult>` — `GrpcHandlerResult = Result<(), GrpcStatus>` is what a gRPC call answers with — and wraps the user delegation. Whatever `intercept` returns is the answer, whether it came from `next.run(ctx).await` or from the interceptor itself:
 
 ```rust
-use toni::{GrpcContext, GrpcHandlerResult};
-use toni::traits_helpers::{Interceptor, InterceptorNext};
+use ulo::{GrpcContext, GrpcHandlerResult};
+use ulo::traits_helpers::{Interceptor, InterceptorNext};
 
 #[injectable]
 pub struct LoggingInterceptor {}
 impl LoggingInterceptor {}
 
-#[toni::async_trait]
+#[ulo::async_trait]
 impl Interceptor<GrpcContext, GrpcHandlerResult> for LoggingInterceptor {
     async fn intercept(
         &self,
@@ -134,24 +134,24 @@ service:before → method:before → handler → method:after → service:after
 To short-circuit with a typed status, return it without calling `next.run`:
 
 ```rust
-#[toni::async_trait]
+#[ulo::async_trait]
 impl Interceptor<GrpcContext, GrpcHandlerResult> for DenyInterceptor {
     async fn intercept(
         &self,
         _ctx: &GrpcContext,
         _next: Box<dyn InterceptorNext<GrpcContext, GrpcHandlerResult>>,
     ) -> GrpcHandlerResult {
-        Err(toni::GrpcStatus::permission_denied("blocked by interceptor"))
+        Err(ulo::GrpcStatus::permission_denied("blocked by interceptor"))
     }
 }
 ```
 
 ## Globals
 
-Three registrars on `ToniFactory` attach an enhancer to every gRPC method in the application, whatever service declares it:
+Three registrars on `UloFactory` attach an enhancer to every gRPC method in the application, whatever service declares it:
 
 ```rust
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_grpc_guards(Arc::new(TenantGuard));
 factory.use_global_grpc_interceptors(Arc::new(MetricsInterceptor));
 factory.use_global_grpc_error_handler(Arc::new(EnvelopeHandler));

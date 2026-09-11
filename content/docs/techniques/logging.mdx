@@ -3,7 +3,7 @@ title: Logging
 description: The default tracing subscriber, RUST_LOG control, and bringing your own.
 ---
 
-Toni applications log out of the box. `ToniFactory::create` — and `create_application_context` for CLI tools and workers — installs a default `tracing` subscriber before anything else runs: a fmt writer to **stderr**, filtered by `RUST_LOG`, defaulting to `info`.
+Ulo applications log out of the box. `UloFactory::create` — and `create_application_context` for CLI tools and workers — installs a default `tracing` subscriber before anything else runs: a fmt writer to **stderr**, filtered by `RUST_LOG`, defaulting to `info`.
 
 ## Controlling the level
 
@@ -11,7 +11,7 @@ Toni applications log out of the box. `ToniFactory::create` — and `create_appl
 
 ```bash
 RUST_LOG=debug ./my_api                    # everything at debug
-RUST_LOG=my_api=debug,toni=warn ./my_api   # per-crate levels
+RUST_LOG=my_api=debug,ulo=warn ./my_api   # per-crate levels
 RUST_LOG=off ./my_api                      # runtime silence
 ```
 
@@ -32,7 +32,7 @@ The default installs via `try_init()`, which backs off when a global subscriber 
 async fn main() {
     tracing_subscriber::fmt().json().init(); // yours — the default backs off
 
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     // ...
 }
 ```
@@ -42,7 +42,7 @@ async fn main() {
 The default subscriber ships behind the default-on `logger` cargo feature, which gates the `tracing-subscriber` dependency:
 
 ```toml title="Cargo.toml"
-toni = { version = "0.2", default-features = false }
+ulo = { version = "0.2", default-features = false }
 ```
 
 `RUST_LOG=off` silences output at runtime without recompiling; `default-features = false` removes the dependency entirely.

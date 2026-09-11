@@ -1,18 +1,18 @@
 ---
 title: Prisma
-description: Integrating a Prisma-generated client with Toni's module system.
+description: Integrating a Prisma-generated client with Ulo's module system.
 ---
 
-`toni-prisma` provides a `PrismaModule` that wraps any `prisma-client-rust`-generated client and makes it injectable throughout your application.
+`ulo-db-prisma` provides a `PrismaModule` that wraps any `prisma-client-rust`-generated client and makes it injectable throughout your application.
 
 ## Setup
 
-First, set up `prisma-client-rust` by following its [documentation](https://prisma.brendonovich.dev). Then add `toni-prisma`:
+First, set up `prisma-client-rust` by following its [documentation](https://prisma.brendonovich.dev). Then add `ulo-db-prisma`:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-prisma = "0.1"
+ulo = "0.2"
+ulo-db-prisma = "0.1"
 # plus your generated prisma client crate (e.g. "db" or "prisma")
 ```
 
@@ -21,7 +21,7 @@ toni-prisma = "0.1"
 Pass an async closure that creates your generated client to `PrismaModule::for_root`:
 
 ```rust
-use toni_prisma::PrismaModule;
+use ulo_db_prisma::PrismaModule;
 
 mod db {
     // prisma-client-rust generated client
@@ -42,7 +42,7 @@ pub struct AppModule;
 
 `for_root` calls the closure once at startup and registers the resulting client as a global provider. The closure must return a `Future` that resolves to your `PrismaClient` type.
 
-Prisma is the one database integration without a startup check. The other integrations return a `CheckedModule` that probes the server before the application serves; Prisma's `connect` closure is opaque — there is no operation the framework can call on an arbitrary client type to see whether it works — so `for_root` returns a plain `DynamicModule` and an unreachable database surfaces where the client is first used, not from `ToniFactory::create`.
+Prisma is the one database integration without a startup check. The other integrations return a `CheckedModule` that probes the server before the application serves; Prisma's `connect` closure is opaque — there is no operation the framework can call on an arbitrary client type to see whether it works — so `for_root` returns a plain `DynamicModule` and an unreachable database surfaces where the client is first used, not from `UloFactory::create`.
 
 ## Injecting the client
 
@@ -144,7 +144,7 @@ Name every client past the first. Names are global identifiers; two connections 
 ## API reference
 
 ```rust
-use toni_prisma::PrismaModule;
+use ulo_db_prisma::PrismaModule;
 
 PrismaModule::for_root<C, F, Fut>(connect: F) -> DynamicModule
 PrismaModule::for_root_named<C, F, Fut>(name: impl Into<String>, connect: F) -> DynamicModule

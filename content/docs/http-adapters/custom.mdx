@@ -1,14 +1,14 @@
 ---
 title: Custom Adapters
-description: Implement the HttpAdapter trait to integrate Toni with any HTTP server.
+description: Implement the HttpAdapter trait to integrate Ulo with any HTTP server.
 ---
 
-If none of the five official adapters fits your constraints, implement `HttpAdapter` to back Toni with any HTTP server. The contract has three parts: store routes during `register_route`, optionally accept WebSocket paths in `register_ws_route`, and consume yourself into a self-contained lifecycle handle in `into_lifecycle`.
+If none of the five official adapters fits your constraints, implement `HttpAdapter` to back Ulo with any HTTP server. The contract has three parts: store routes during `register_route`, optionally accept WebSocket paths in `register_ws_route`, and consume yourself into a self-contained lifecycle handle in `into_lifecycle`.
 
 ## The contract
 
 ```rust
-#[toni::async_trait]
+#[ulo::async_trait]
 pub trait HttpAdapter: Send + Sync + 'static {
     fn register_route(
         &mut self,
@@ -28,7 +28,7 @@ pub trait HttpAdapter: Send + Sync + 'static {
 }
 ```
 
-Everything you need is exported from the `toni` crate root: `HttpAdapter`, `HttpMethod`, `RequestHandler`, `AdapterContext`, `BindTarget`, `HttpLifecycleHandle`, `HttpRequest`, `HttpResponse`, `WsConnectionCallbacks`, plus `http_helpers::{PathParams, RequestBody}`.
+Everything you need is exported from the `ulo` crate root: `HttpAdapter`, `HttpMethod`, `RequestHandler`, `AdapterContext`, `BindTarget`, `HttpLifecycleHandle`, `HttpRequest`, `HttpResponse`, `WsConnectionCallbacks`, plus `http_helpers::{PathParams, RequestBody}`.
 
 **`register_route`** is called at bootstrap for every route the framework discovers. Store the `(method, path, handler)` triple; build the native router later. Each `Arc<dyn RequestHandler>` wraps one route's full pipeline — route-scoped middleware, guards, interceptors, and the controller — behind a single call:
 
@@ -74,17 +74,17 @@ let http_res = ctx
 
 Anchored this way, the chain observes every request: matched routes, unknown paths (404), method mismatches (405), and same-port WebSocket upgrades. A middleware can short-circuit by returning a response without invoking the closure, which is how CORS preflight is answered. The closure receives the request the chain forwards: a middleware that rewrites the URI changes which route matches. Wrapping individual matched-route handlers instead breaks all of this — 405s and preflight would be answered by the native router before the chain ever runs.
 
-The router's catch-all for unmatched paths produces Toni's standard 404 envelope (`{"statusCode": 404, "message": "Cannot GET /x", "error": "Not Found"}`) — the official adapters all do.
+The router's catch-all for unmatched paths produces Ulo's standard 404 envelope (`{"statusCode": 404, "message": "Cannot GET /x", "error": "Not Found"}`) — the official adapters all do.
 
 ## Converting requests and responses
 
-Toni's `HttpRequest` is built from `http::request::Parts` plus a body:
+Ulo's `HttpRequest` is built from `http::request::Parts` plus a body:
 
 ```rust
 // Streaming — hand frames through as they arrive (preferred):
 let req = HttpRequest::from_parts(parts, RequestBody::Streaming(boxed_body));
 
-// Buffered — when the native server can't stream (e.g. toni-rocket):
+// Buffered — when the native server can't stream (e.g. ulo-http-rocket):
 let req = HttpRequest::from_parts(parts, RequestBody::Buffered(bytes));
 ```
 
@@ -98,13 +98,13 @@ Going the other way, `HttpResponse` is a plain struct — `status: u16`, `header
 
 ## Skeleton
 
-Abridged from `toni-axum` — every shown signature is real:
+Abridged from `ulo-http-axum` — every shown signature is real:
 
 ```rust
 use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::watch;
-use toni::{
+use ulo::{
     AdapterContext, BindTarget, HttpAdapter, HttpLifecycleHandle, HttpMethod,
     HttpRequest, HttpResponse, RequestHandler,
     http_helpers::{PathParams, RequestBody},
@@ -122,7 +122,7 @@ impl MyAdapter {
     }
 }
 
-#[toni::async_trait]
+#[ulo::async_trait]
 impl HttpAdapter for MyAdapter {
     fn register_route(
         &mut self,
@@ -181,7 +181,7 @@ impl HttpAdapter for MyAdapter {
 Register it like any official adapter:
 
 ```rust
-let mut app = ToniFactory::new().create_with(AppModule).await?;
+let mut app = UloFactory::new().create_with(AppModule).await?;
 app.use_http_adapter(MyAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await?;
 ```
@@ -200,8 +200,8 @@ For separate-port gateways (`#[websocket_gateway(port = N)]`), implement the `We
 
 The five in-repo crates are the canonical references, in roughly ascending complexity:
 
-- [`toni-poem`](https://github.com/ifeanyi-ugwu/toni-rs/tree/master/toni-poem) — near-zero body conversion, both WebSocket modes
-- [`toni-axum`](https://github.com/ifeanyi-ugwu/toni-rs/tree/master/toni-axum) — path-syntax rewrite, both WebSocket modes
-- [`toni-salvo`](https://github.com/ifeanyi-ugwu/toni-rs/tree/master/toni-salvo) — trait-object handlers, method-mapping workarounds
-- [`toni-actix`](https://github.com/ifeanyi-ugwu/toni-rs/tree/master/toni-actix) — the buffered, HTTP-only minimum
-- [`toni-rocket`](https://github.com/ifeanyi-ugwu/toni-rs/tree/master/toni-rocket) — buffered requests, fairing-based address discovery
+- [`ulo-http-poem`](https://github.com/ulo-rs/ulo/tree/master/crates/ulo-http-poem) — near-zero body conversion, both WebSocket modes
+- [`ulo-http-axum`](https://github.com/ulo-rs/ulo/tree/master/crates/ulo-http-axum) — path-syntax rewrite, both WebSocket modes
+- [`ulo-http-salvo`](https://github.com/ulo-rs/ulo/tree/master/crates/ulo-http-salvo) — trait-object handlers, method-mapping workarounds
+- [`ulo-http-actix`](https://github.com/ulo-rs/ulo/tree/master/crates/ulo-http-actix) — the buffered, HTTP-only minimum
+- [`ulo-http-rocket`](https://github.com/ulo-rs/ulo/tree/master/crates/ulo-http-rocket) — buffered requests, fairing-based address discovery

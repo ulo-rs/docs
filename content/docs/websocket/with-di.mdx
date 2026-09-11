@@ -10,9 +10,9 @@ WebSocket gateways are providers like any other. They participate fully in the D
 Declare dependencies as `#[inject]` fields and take them in the `#[new]` constructor:
 
 ```rust
-use toni::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
-use toni::WsHandlerResult;
-use toni::{injectable, module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
+use ulo::websocket::{BroadcastModule, BroadcastService, WsClient, WsError, WsHandlerOutput, WsMessage};
+use ulo::WsHandlerResult;
+use ulo::{injectable, module, new, on_connect, on_disconnect, subscriptions, websocket_gateway};
 
 #[injectable]
 pub struct GameService { /* ... */ }
@@ -80,10 +80,10 @@ What `handle_connect` establishes here lives in the injected service, keyed by c
 A WebSocket guard is a plain `#[injectable]` provider implementing `Guard<WsContext>` — no marker macro. The role is detected from the trait impl:
 
 ```rust
-use toni::async_trait;
-use toni::context::WsContext;
-use toni::traits_helpers::Guard;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::WsContext;
+use ulo::traits_helpers::Guard;
+use ulo::injectable;
 
 #[injectable]
 pub struct WsAuthGuard;
@@ -153,7 +153,7 @@ Register a guard for every gateway on the factory. Global enhancers are per-tran
 ```rust
 use std::sync::Arc;
 
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_ws_guards(Arc::new(WsAuthGuard));
 let mut app = factory.create_with(ChatModule).await?;
 ```
@@ -165,11 +165,11 @@ Globally registered instances are constructed by you (`Arc::new`), so they don't
 Same model: `#[injectable]` + `Interceptor<WsContext, WsHandlerResult>`. Interceptors wrap the handler — run code before and after, or rewrite the reply. Whatever `intercept` returns is the answer:
 
 ```rust
-use toni::async_trait;
-use toni::context::WsContext;
-use toni::traits_helpers::{Interceptor, InterceptorNext};
-use toni::WsHandlerResult;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::WsContext;
+use ulo::traits_helpers::{Interceptor, InterceptorNext};
+use ulo::WsHandlerResult;
+use ulo::injectable;
 
 #[injectable]
 pub struct WsLoggingInterceptor;
@@ -192,7 +192,7 @@ impl Interceptor<WsContext, WsHandlerResult> for WsLoggingInterceptor {
 To rewrite the handler's reply, rewrite the value `next.run(ctx).await` returned:
 
 ```rust
-use toni::websocket::{WsHandlerOutput, WsMessage};
+use ulo::websocket::{WsHandlerOutput, WsMessage};
 
 #[injectable]
 pub struct WsPrefixInterceptor;
@@ -231,11 +231,11 @@ impl ChatGateway {
 An error handler is the same shape again: `#[injectable]` + `ErrorHandler<WsContext, WsMessage>`. Note the answer type — the chain answers with a bare `WsMessage`, not the `WsHandlerResult` an interceptor returns. Returning `None` observes the error without shaping it and passes it to the next handler in the chain:
 
 ```rust
-use toni::async_trait;
-use toni::context::WsContext;
-use toni::traits_helpers::{ChainError, ErrorHandler};
-use toni::websocket::WsMessage;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::WsContext;
+use ulo::traits_helpers::{ChainError, ErrorHandler};
+use ulo::websocket::WsMessage;
+use ulo::injectable;
 
 #[injectable]
 pub struct WsErrorLogger;
@@ -267,7 +267,7 @@ ctx.cancellation()  // &CancellationToken
 ctx.deadline()      // Option<Instant> — always None here; the transport carries no deadline
 ```
 
-`metadata`, `cache`, `cancellation` and `deadline` come from the `HandlerContext` trait, so `use toni::context::HandlerContext;` has to be in scope to call them.
+`metadata`, `cache`, `cancellation` and `deadline` come from the `HandlerContext` trait, so `use ulo::context::HandlerContext;` has to be in scope to call them.
 
 There is no response slot: a handler answers by returning, and an interceptor that wants a different answer returns a different value.
 
@@ -291,7 +291,7 @@ Refusing a connection still answers the caller: the canonical envelope, then a c
 
 ## Lifecycle hooks on gateways
 
-Gateways support the same lifecycle hooks as any provider. All hooks are `async`; the two startup hooks return `toni::InitResult`:
+Gateways support the same lifecycle hooks as any provider. All hooks are `async`; the two startup hooks return `ulo::InitResult`:
 
 ```rust
 #[websocket_gateway("/ticker")]
@@ -302,7 +302,7 @@ pub struct StockTickerGateway {
 
 impl StockTickerGateway {
     #[on_module_init]
-    async fn init(&self) -> toni::InitResult {
+    async fn init(&self) -> ulo::InitResult {
         self.market_service.connect().await;
         Ok(())
     }

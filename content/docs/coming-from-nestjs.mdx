@@ -1,9 +1,9 @@
 ---
 title: Coming from NestJS
-description: The decorator-to-macro map, a small NestJS application ported line by line, and the places where Toni diverges.
+description: The decorator-to-macro map, a small NestJS application ported line by line, and the places where Ulo diverges.
 ---
 
-Toni takes its architecture from NestJS: modules own controllers and providers, dependencies arrive through a container, and every request passes through guards and interceptors on its way to a handler. If you know that model, you already know how a Toni application is laid out.
+Ulo takes its architecture from NestJS: modules own controllers and providers, dependencies arrive through a container, and every request passes through guards and interceptors on its way to a handler. If you know that model, you already know how a Ulo application is laid out.
 
 What changes is the language. TypeScript decorators become Rust attribute macros, classes become structs, and a handful of NestJS constructs turn out to be unnecessary once types survive to runtime. This page covers all three: the map, a full port, and the divergences.
 
@@ -11,7 +11,7 @@ What changes is the language. TypeScript decorators become Rust attribute macros
 
 ### Declarations
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
 | `@Module({ ... })` | `#[module(...)]` on a unit struct or an `impl` block |
 | `imports` / `controllers` / `providers` / `exports` | same four keys, same meaning |
@@ -32,7 +32,7 @@ The verb macros stop at `#[get]`, `#[post]`, `#[put]`, `#[delete]`, and `#[sse]`
 
 ### The enhancer chain
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
 | `CanActivate` | `Guard<C>` |
 | `NestInterceptor` | `Interceptor<C, R>` |
@@ -43,11 +43,11 @@ The verb macros stop at `#[get]`, `#[post]`, `#[put]`, `#[delete]`, and `#[sse]`
 | `HttpException` | `HttpError` |
 | `RpcException` | `RpcError` |
 
-Toni auto-detects the role from the trait you implement — there is no marker attribute corresponding to a class implementing `CanActivate`.
+Ulo auto-detects the role from the trait you implement — there is no marker attribute corresponding to a class implementing `CanActivate`.
 
 ### Reading the request
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
 | `@Param('id')` | a `Path<T>` parameter; the route spells it `{id}` |
 | `@Query()` | `Query<T>` |
@@ -61,7 +61,7 @@ Extractors are handler parameters, matched by type. There is also a marker form 
 
 ### Custom providers
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
 | `{ provide: 'TOKEN', useValue: value }` | `provider_value!("TOKEN", value)` |
 | `{ provide: 'TOKEN', useFactory: () => fn() }` | `provider_factory!("TOKEN", \|\| fn())` |
@@ -73,7 +73,7 @@ The `inject: [...]` array has no counterpart: the factory closure's parameter ty
 
 ### Lifecycle hooks
 
-| NestJS interface | Toni attribute |
+| NestJS interface | Ulo attribute |
 |-----------------|----------------|
 | `OnModuleInit` | `#[on_module_init]` |
 | `OnApplicationBootstrap` | `#[on_application_bootstrap]` |
@@ -83,29 +83,29 @@ The `inject: [...]` array has no counterpart: the factory closure's parameter ty
 
 ### Platforms and transports
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
-| `@nestjs/platform-express`, `-fastify` | `toni-axum`, `toni-actix`, `toni-salvo`, `toni-poem`, `toni-rocket` |
-| `Transport.TCP` | `toni-tcp` |
-| `Transport.NATS` | `toni-nats` |
-| `Transport.REDIS` | `toni-redis-rpc` |
-| `Transport.RMQ` | `toni-rabbitmq` |
-| `Transport.MQTT` | `toni-mqtt` |
-| `Transport.KAFKA` | `toni-kafka` |
-| `Transport.GRPC` | `toni-grpc` |
+| `@nestjs/platform-express`, `-fastify` | `ulo-http-axum`, `ulo-http-actix`, `ulo-http-salvo`, `ulo-http-poem`, `ulo-http-rocket` |
+| `Transport.TCP` | `ulo-rpc-tcp` |
+| `Transport.NATS` | `ulo-rpc-nats` |
+| `Transport.REDIS` | `ulo-rpc-redis` |
+| `Transport.RMQ` | `ulo-rpc-rabbitmq` |
+| `Transport.MQTT` | `ulo-rpc-mqtt` |
+| `Transport.KAFKA` | `ulo-rpc-kafka` |
+| `Transport.GRPC` | `ulo-grpc` |
 
 An adapter is registered at runtime and held as a boxed trait object, so application code never names the concrete adapter type — the same property that makes swapping Express for Fastify a one-line change in NestJS.
 
 ### Integrations
 
-| NestJS | Toni |
+| NestJS | Ulo |
 |--------|------|
 | `TypeOrmModule.forRoot()` | `SeaOrmModule::for_root()`, or `SqlxModule::postgres()` for raw SQL |
 | `MongooseModule.forRoot()` | `MongoModule::for_root(uri, db)` |
 | `PrismaModule` | `PrismaModule::for_root(client)` |
 | `ConfigModule.forRoot()` | `ConfigModule::<T>::new()` |
-| `@nestjs/terminus` | `toni-terminus` |
-| `@nestjs/graphql` | `toni-async-graphql`, `toni-juniper` |
+| `@nestjs/terminus` | `ulo-health` |
+| `@nestjs/graphql` | `ulo-graphql-async-graphql`, `ulo-graphql-juniper` |
 | `@nestjs/testing` | construct the struct directly, or `create_application_context` |
 
 `forRoot()` carries over as `for_root`, and returns a `DynamicModule` you list under `imports:`.
@@ -126,7 +126,7 @@ export class UserService {
 ```
 
 ```rust
-// Toni
+// Ulo
 #[injectable]
 pub struct UserService;
 
@@ -158,7 +158,7 @@ export class UserController {
 ```
 
 ```rust
-// Toni
+// Ulo
 #[controller("/users")]
 pub struct UserController {
     #[inject]
@@ -194,7 +194,7 @@ export class AppModule {}
 ```
 
 ```rust
-// Toni
+// Ulo
 #[module(
   imports: [],
   controllers: [UserController],
@@ -215,21 +215,21 @@ await app.listen(3000);
 ```
 
 ```rust
-// Toni
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+// Ulo
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
 app.start().await.unwrap();
 ```
 
 `create` takes the root module the way `NestFactory.create` does. There is no `app.listen`: the HTTP server is a separate choice, and `use_http_adapter` is the call that registers every route from the module tree with it.
 
-## Where Toni diverges
+## Where Ulo diverges
 
 These are the places the map above does not reach — where a NestJS habit produces code that is wrong rather than merely spelled differently.
 
 ### There is no `forwardRef`
 
-`forwardRef` defers a class reference that is `undefined` at module-evaluation time. Toni identifies providers by string token and resolves them at runtime, so a reference is never undefined and there is nothing to defer. A reported cycle is a real construction cycle; break it.
+`forwardRef` defers a class reference that is `undefined` at module-evaluation time. Ulo identifies providers by string token and resolves them at runtime, so a reference is never undefined and there is nothing to defer. A reported cycle is a real construction cycle; break it.
 
 ### Guards cannot throw
 
@@ -237,11 +237,11 @@ These are the places the map above does not reach — where a NestJS habit produ
 
 ### There is no `ValidationPipe`
 
-NestJS leans on a global `ValidationPipe` because TypeScript types are erased at runtime. In Toni, `Path<i32>` parses and `Validated<Json<T>>` validates, both declared in the handler signature and enforced by the compiler. `Validated<E>` validates whatever extractor `E` wraps, on any transport — `Validated<Payload<T>>` checks an RPC message or a WebSocket frame the same way. A check that needs a dependency, or one spanning several extracted values, belongs in a guard or in a custom `FromContext` extractor.
+NestJS leans on a global `ValidationPipe` because TypeScript types are erased at runtime. In Ulo, `Path<i32>` parses and `Validated<Json<T>>` validates, both declared in the handler signature and enforced by the compiler. `Validated<E>` validates whatever extractor `E` wraps, on any transport — `Validated<Payload<T>>` checks an RPC message or a WebSocket frame the same way. A check that needs a dependency, or one spanning several extracted values, belongs in a guard or in a custom `FromContext` extractor.
 
 ### Error handlers are the override, not the default
 
-A `#[derive(toni::Error)]` type carries an `ErrorKind` and renders itself — return it with `?` and the response is already correct. `#[catch(T)]` is how you override that rendering for one type, not how errors normally become responses.
+A `#[derive(ulo::Error)]` type carries an `ErrorKind` and renders itself — return it with `?` and the response is already correct. `#[catch(T)]` is how you override that rendering for one type, not how errors normally become responses.
 
 ### Globals are registered per transport
 
@@ -257,11 +257,11 @@ A request-scoped provider is built once per *execution*: one HTTP request, one W
 
 ### Nothing handles signals for you
 
-NestJS starts running shutdown hooks on SIGTERM once `enableShutdownHooks()` is called. Toni installs no signal handlers. Wire SIGTERM and SIGINT to a `ShutdownHandle` yourself, or the hooks never run — see [Graceful Shutdown](/docs/techniques/graceful-shutdown).
+NestJS starts running shutdown hooks on SIGTERM once `enableShutdownHooks()` is called. Ulo installs no signal handlers. Wire SIGTERM and SIGINT to a `ShutdownHandle` yourself, or the hooks never run — see [Graceful Shutdown](/docs/techniques/graceful-shutdown).
 
 ### Startup has three phases, and each can fail
 
-`create` resolves the dependency graph and runs init hooks. `bind` acquires sockets. `run` serves. All four constructors return `Result`, and `bind` is refuse-or-none: a transport that fails takes the whole application down and closes whatever was already acquired. Registration precedes acquisition for HTTP, WebSocket, and gRPC, so a misconfiguration on those reports before a port conflict does; `toni-tcp` and `toni-udp` take their socket while registering, and can report a conflict first. Nothing calls `process::exit`.
+`create` resolves the dependency graph and runs init hooks. `bind` acquires sockets. `run` serves. All four constructors return `Result`, and `bind` is refuse-or-none: a transport that fails takes the whole application down and closes whatever was already acquired. Registration precedes acquisition for HTTP, WebSocket, and gRPC, so a misconfiguration on those reports before a port conflict does; `ulo-rpc-tcp` and `ulo-rpc-udp` take their socket while registering, and can report a conflict first. Nothing calls `process::exit`.
 
 ### The application is `!Send`
 
@@ -269,6 +269,6 @@ The container is `Rc<RefCell<_>>`, so the app cannot cross threads. `main` can s
 
 ## Next
 
-- [Quick Start](/docs/getting-started/quick-start) — the same user resource, built from scratch in Toni
+- [Quick Start](/docs/getting-started/quick-start) — the same user resource, built from scratch in Ulo
 - [Core Concepts](/docs/core-concepts/modules) — modules, controllers, services, and the container
 - [Request Lifecycle](/docs/request-lifecycle) — the full order, and what each layer can do

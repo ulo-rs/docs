@@ -3,7 +3,7 @@ title: Server-Sent Events
 description: Stream events from server to client over a persistent HTTP connection.
 ---
 
-Server-Sent Events (SSE) push a stream of events to the browser over a single long-lived HTTP response. Toni provides the `#[sse]` route attribute for declaring SSE handlers, `SseEvent` for building individual events, and lower-level `sse()` / `Sse::new()` helpers for wrapping a stream manually.
+Server-Sent Events (SSE) push a stream of events to the browser over a single long-lived HTTP response. Ulo provides the `#[sse]` route attribute for declaring SSE handlers, `SseEvent` for building individual events, and lower-level `sse()` / `Sse::new()` helpers for wrapping a stream manually.
 
 ## The #[sse] attribute
 
@@ -11,7 +11,7 @@ Server-Sent Events (SSE) push a stream of events to the browser over a single lo
 
 ```rust
 use futures::{stream, Stream};
-use toni::SseEvent;
+use ulo::SseEvent;
 
 #[sse("/events")]
 async fn events(&self) -> impl Stream<Item = SseEvent> {
@@ -31,7 +31,7 @@ async fn events(&self) -> impl Stream<Item = Result<SseEvent, std::io::Error>> {
 }
 ```
 
-Toni sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, and `X-Accel-Buffering: no` (tells nginx/caddy not to buffer) on the response.
+Ulo sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, and `X-Accel-Buffering: no` (tells nginx/caddy not to buffer) on the response.
 
 For setup that can fail *before* streaming starts — validating a subscription token, say — use a guard, or a `#[get]` handler returning `Result<impl IntoResponse, E>` with an explicit `sse(stream)` call (see [below](#the-lower-level-helpers)).
 
@@ -51,7 +51,7 @@ Only `data` is required. Multi-line data is split into multiple `data:` lines pe
 ```rust
 use std::time::Duration;
 use futures::{stream, Stream};
-use toni::SseEvent;
+use ulo::SseEvent;
 
 #[sse("/counter")]
 async fn counter(&self) -> impl Stream<Item = SseEvent> {
@@ -77,8 +77,8 @@ A service holding a `broadcast::Sender` fans out to every connected client — t
 use std::pin::Pin;
 use futures::{stream, Stream};
 use tokio::sync::broadcast;
-use toni::extractors::Bytes;
-use toni::*;
+use ulo::extractors::Bytes;
+use ulo::*;
 
 #[injectable]
 pub struct EventsService {
@@ -157,7 +157,7 @@ curl -X POST http://127.0.0.1:3000/sse/emit -d 'hello everyone'
 - `Sse::new(stream)` — wraps a `Stream<Item = Result<SseEvent, E>>`; any `E: Into<Box<dyn Error + Send + Sync>>` works.
 
 ```rust
-use toni::{sse, Sse, SseEvent};
+use ulo::{sse, Sse, SseEvent};
 
 #[get("/events")]
 async fn events(&self) -> impl IntoResponse {

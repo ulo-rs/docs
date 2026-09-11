@@ -1,5 +1,5 @@
 ---
-title: toni-nats
+title: ulo-rpc-nats
 description: API reference for the NATS RPC adapter and client transport crate.
 ---
 
@@ -8,20 +8,20 @@ description: API reference for the NATS RPC adapter and client transport crate.
 Server-side RPC transport. Subscribes to NATS subjects matching registered pattern names and dispatches inbound messages to RPC controllers. Request-response uses NATS reply-to inboxes; fire-and-forget uses plain publish with no reply-to.
 
 ```rust
-use toni_nats::NatsAdapter;
+use ulo_rpc_nats::NatsAdapter;
 
 NatsAdapter::new(servers: impl IntoNatsServers) -> NatsAdapter
 ```
 
-Register after `ToniFactory::create`:
+Register after `UloFactory::create`:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_rpc_adapter(NatsAdapter::new("nats://127.0.0.1:4222")).unwrap();
 app.start().await.unwrap();
 ```
 
-Beyond the pattern subjects, the adapter subscribes `toni.rpc.cancel` — the subject carrying stream-cancel notices — without a queue group, so every instance sees every notice and only the one holding the call acts on it.
+Beyond the pattern subjects, the adapter subscribes `ulo.rpc.cancel` — the subject carrying stream-cancel notices — without a queue group, so every instance sees every notice and only the one holding the call acts on it.
 
 The connection and every subscription are made inside the serve loop, not during `bind()`. A broker that is never reachable panics the serve task after `app.bind()` has already reported success.
 
@@ -32,7 +32,7 @@ The connection and every subscription are made inside the serve loop, not during
 Client-side transport for `RpcClient`. Uses `async_nats::Client::request` for request-response and `async_nats::Client::publish` for fire-and-forget. Connection is established lazily.
 
 ```rust
-use toni_nats::NatsClientTransport;
+use ulo_rpc_nats::NatsClientTransport;
 
 NatsClientTransport::new(servers: impl IntoNatsServers) -> NatsClientTransport
 NatsClientTransport::new(...).with_timeout(Duration) -> NatsClientTransport  // default: 5 s
@@ -60,7 +60,7 @@ open_stream(pattern: &str, data: RpcData, metadata: HashMap<String, String>)
 
 `RpcClient::stream` / `RpcRequest::stream` call it. `send` uses the broker's native request; a stream needs an inbox that outlives the first message, so `open_stream` subscribes one explicitly and publishes the request with that inbox as its reply-to.
 
-The returned `RpcReplyStream` yields `Result<RpcData, RpcClientError>` until the server's end marker. Dropping it before that — or letting the per-frame gap expire — publishes `{"cancel": true, "key": "<inbox>"}` to `toni.rpc.cancel`, and the server aborts the call.
+The returned `RpcReplyStream` yields `Result<RpcData, RpcClientError>` until the server's end marker. Dropping it before that — or letting the per-frame gap expire — publishes `{"cancel": true, "key": "<inbox>"}` to `ulo.rpc.cancel`, and the server aborts the call.
 
 ### Per-call headers
 
@@ -110,7 +110,7 @@ The NATS adapter publishes JSON to the reply-to inbox in the same format as the 
 {"response": {...}}
 ```
 
-**Domain errors** — a handler returning a type implementing `toni::Error` produces a wire-success frame carrying the canonical error envelope, not a wire error:
+**Domain errors** — a handler returning a type implementing `ulo::Error` produces a wire-success frame carrying the canonical error envelope, not a wire error:
 
 ```json
 {"response": {"status": "error", "kind": "NotFound", "message": "...", "details": {...}}}

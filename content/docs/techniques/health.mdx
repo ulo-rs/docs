@@ -1,15 +1,15 @@
 ---
 title: Health Checks
-description: Application health endpoints with toni-terminus — liveness, readiness, and custom indicators.
+description: Application health endpoints with ulo-health — liveness, readiness, and custom indicators.
 ---
 
-`toni-terminus` provides a `HealthCheckService` and a set of built-in indicators for HTTP endpoints, memory, and disk. Database crates expose their own indicators behind an optional `health` feature flag.
+`ulo-health` provides a `HealthCheckService` and a set of built-in indicators for HTTP endpoints, memory, and disk. Database crates expose their own indicators behind an optional `health` feature flag.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni-terminus = { version = "0.1", features = ["http", "memory", "disk", "timeout"] }
+ulo-health = { version = "0.1", features = ["http", "memory", "disk", "timeout"] }
 ```
 
 All features are opt-in:
@@ -26,7 +26,7 @@ All features are opt-in:
 Import `TerminusModule` once in your root module. It registers `HealthCheckService` globally, and each enabled feature registers its indicator:
 
 ```rust
-use toni_terminus::TerminusModule;
+use ulo_health::TerminusModule;
 
 #[module(
     imports: [TerminusModule::new()],
@@ -39,8 +39,8 @@ pub struct AppModule;
 
 ```rust
 use std::time::Duration;
-use toni::*;
-use toni_terminus::{
+use ulo::*;
+use ulo_health::{
     HealthCheckService, HttpHealthIndicator, MemoryHealthIndicator, DiskHealthIndicator,
 };
 
@@ -175,26 +175,26 @@ self.health
 Each database crate provides a health indicator behind a `health` feature flag. Enable it alongside the rest of your database setup:
 
 ```toml title="Cargo.toml"
-toni-redis  = { version = "0.1", features = ["health"] }
-toni-seaorm = { version = "0.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "health"] }
-toni-mongodb = { version = "0.1", features = ["health"] }
-toni-sqlx   = { version = "0.1", features = ["postgres", "runtime-tokio-rustls", "health"] }
-toni-diesel = { version = "0.1", features = ["postgres", "health"] }
+ulo-db-redis  = { version = "0.1", features = ["health"] }
+ulo-db-seaorm = { version = "0.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "health"] }
+ulo-db-mongodb = { version = "0.1", features = ["health"] }
+ulo-db-sqlx   = { version = "0.1", features = ["postgres", "runtime-tokio-rustls", "health"] }
+ulo-db-diesel = { version = "0.1", features = ["postgres", "health"] }
 ```
 
 When `health` is enabled, `for_root()` also registers the indicator alongside the connection; inject it directly. The indicator shares the registered connection and resolves it lazily on each check, so there is no second pool per database:
 
 | Crate         | Indicator type                  | Method            |
 |---------------|---------------------------------|-------------------|
-| `toni-redis`  | `RedisHealthIndicator`          | `ping_check(key)` |
-| `toni-seaorm` | `SeaOrmHealthIndicator`         | `ping_check(key)` |
-| `toni-mongodb`| `MongoHealthIndicator`          | `ping_check(key)` |
-| `toni-sqlx`   | `SqlxHealthIndicator<DB>`       | `ping_check(key)` |
-| `toni-diesel` | `PgHealthIndicator` / `MySqlHealthIndicator` | `ping_check(key)` |
+| `ulo-db-redis`  | `RedisHealthIndicator`          | `ping_check(key)` |
+| `ulo-db-seaorm` | `SeaOrmHealthIndicator`         | `ping_check(key)` |
+| `ulo-db-mongodb`| `MongoHealthIndicator`          | `ping_check(key)` |
+| `ulo-db-sqlx`   | `SqlxHealthIndicator<DB>`       | `ping_check(key)` |
+| `ulo-db-diesel` | `PgHealthIndicator` / `MySqlHealthIndicator` | `ping_check(key)` |
 
 ```rust
-use toni_redis::RedisHealthIndicator;
-use toni_seaorm::SeaOrmHealthIndicator;
+use ulo_db_redis::RedisHealthIndicator;
+use ulo_db_seaorm::SeaOrmHealthIndicator;
 
 #[controller("/health")]
 pub struct HealthController {
@@ -227,7 +227,7 @@ Implement `HealthIndicator` for checks the built-ins don't cover. Clone all stat
 ```rust
 use futures::future::BoxFuture;
 use serde_json::json;
-use toni_terminus::{HealthEntry, HealthIndicator, HealthIndicatorResult};
+use ulo_health::{HealthEntry, HealthIndicator, HealthIndicatorResult};
 
 pub struct MyServiceIndicator {
     client: reqwest::Client,

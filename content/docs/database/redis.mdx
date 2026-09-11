@@ -1,9 +1,9 @@
 ---
 title: Redis
-description: Integrating Redis with Toni's module system via the managed ConnectionManager.
+description: Integrating Redis with Ulo's module system via the managed ConnectionManager.
 ---
 
-`toni-redis` provides a `RedisModule` that opens a managed Redis connection at startup and makes `redis::aio::ConnectionManager` available application-wide.
+`ulo-db-redis` provides a `RedisModule` that opens a managed Redis connection at startup and makes `redis::aio::ConnectionManager` available application-wide.
 
 ## Setup
 
@@ -11,8 +11,8 @@ Add the dependency:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-redis = "0.1"
+ulo = "0.2"
+ulo-db-redis = "0.1"
 redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 ```
 
@@ -21,7 +21,7 @@ redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 Call `RedisModule::for_root` in your root module's `imports`:
 
 ```rust
-use toni_redis::RedisModule;
+use ulo_db_redis::RedisModule;
 
 #[module(
     imports: [
@@ -35,14 +35,14 @@ pub struct AppModule;
 
 `for_root` returns a **global** `CheckedModule` — a `DynamicModule` carrying a configurable startup check. It works anywhere a module does: as an import or as the root module.
 
-The `ConnectionManager` itself is constructed lazily, without dialing. What verifies the server is the [startup check](#startup-check): it probes Redis in `on_module_init`, so an invalid URL or an unreachable server surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create` — naming the module, with any password in the connection URL redacted (`redis://user:***@host:6379`) — rather than on the first command.
+The `ConnectionManager` itself is constructed lazily, without dialing. What verifies the server is the [startup check](#startup-check): it probes Redis in `on_module_init`, so an invalid URL or an unreachable server surfaces as `Err(StartupError::HookFailed)` from `UloFactory::create` — naming the module, with any password in the connection URL redacted (`redis://user:***@host:6379`) — rather than on the first command.
 
 ## Startup check
 
 By default the module confirms Redis answers before the application starts: 3 attempts, 2 seconds apart, each bounded to 5 seconds — worst case ≈ 19 s. Tune the schedule with `with_startup_check`:
 
 ```rust
-use toni::StartupCheck;
+use ulo::StartupCheck;
 
 RedisModule::for_root(url)
     .with_startup_check(StartupCheck::default().attempts(5))
@@ -133,12 +133,12 @@ pub struct AppModule;
 
 ## Health checks
 
-Enable the `health` feature to have `for_root` also register a `RedisHealthIndicator`, which exposes `ping_check(key)` for use with `toni-terminus`. The indicator shares the registered connection — enabling `health` opens no second client — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
+Enable the `health` feature to have `for_root` also register a `RedisHealthIndicator`, which exposes `ping_check(key)` for use with `ulo-health`. The indicator shares the registered connection — enabling `health` opens no second client — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
 
 ## API reference
 
 ```rust
-use toni_redis::RedisModule;
+use ulo_db_redis::RedisModule;
 
 RedisModule::for_root(url: impl Into<String>) -> CheckedModule
 RedisModule::for_root_named(name: impl Into<String>, url: impl Into<String>) -> CheckedModule

@@ -10,7 +10,7 @@ The `Multipart` extractor parses `multipart/form-data` request bodies. It yields
 ## Basic usage
 
 ```rust
-use toni::extractors::Multipart;
+use ulo::extractors::Multipart;
 
 #[post("/upload")]
 async fn upload(&self, mut mp: Multipart) -> impl IntoResponse {
@@ -26,7 +26,7 @@ async fn upload(&self, mut mp: Multipart) -> impl IntoResponse {
 ## File upload example
 
 ```rust
-use toni::extractors::Multipart;
+use ulo::extractors::Multipart;
 
 #[post("/upload")]
 async fn upload(&self, mut mp: Multipart) -> Body {
@@ -65,7 +65,7 @@ curl -X POST http://127.0.0.1:3000/upload \
 
 ## Field API
 
-`next_field` yields `Result<Option<Field>, MultipartError>`. `Field` is `multer`'s, re-exported as `toni::extractors::multipart::Field` — the module path, not `toni::extractors::Field`. Naming it is only necessary to write a helper that takes one; the loop above never spells the type.
+`next_field` yields `Result<Option<Field>, MultipartError>`. `Field` is `multer`'s, re-exported as `ulo::extractors::multipart::Field` — the module path, not `ulo::extractors::Field`. Naming it is only necessary to write a helper that takes one; the loop above never spells the type.
 
 Each field exposes:
 
@@ -102,7 +102,7 @@ pub enum MultipartError {
 `Parse` is the only variant `next_field` can yield — a body that announced a boundary and then did not follow it. Handle it per field. Unwrapping it panics the handler, which the dispatcher renders as a 500; returning it as an `HttpError` gives the client the 400 the truncated upload deserves:
 
 ```rust
-use toni::{extractors::Multipart, HttpError};
+use ulo::{extractors::Multipart, HttpError};
 
 #[post("/upload")]
 async fn upload(&self, mut mp: Multipart) -> Result<Body, HttpError> {
@@ -117,6 +117,6 @@ async fn upload(&self, mut mp: Multipart) -> Result<Body, HttpError> {
 
 ## Size and buffering
 
-The framework imposes no limit on an upload's size — the adapter decides. `toni-rocket` caps a request at 32 MiB; `toni-salvo` imposes no cap of its own. Enforce your own budget by counting bytes as you read fields, and reject past the threshold rather than after the allocation.
+The framework imposes no limit on an upload's size — the adapter decides. `ulo-http-rocket` caps a request at 32 MiB; `ulo-http-salvo` imposes no cap of its own. Enforce your own budget by counting bytes as you read fields, and reject past the threshold rather than after the allocation.
 
-On `toni-actix` and `toni-rocket` the whole body is buffered before `Multipart` sees it, so field-by-field reading there costs the memory up front. Incremental reads need `toni-axum`, `toni-salvo`, or `toni-poem`.
+On `ulo-http-actix` and `ulo-http-rocket` the whole body is buffered before `Multipart` sees it, so field-by-field reading there costs the memory up front. Incremental reads need `ulo-http-axum`, `ulo-http-salvo`, or `ulo-http-poem`.

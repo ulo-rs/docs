@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: "From a .proto file to a running gRPC server with DI — proto compilation, the toni-build step, #[controller] + #[grpc_methods], and module wiring."
+description: "From a .proto file to a running gRPC server with DI — proto compilation, the ulo-build step, #[controller] + #[grpc_methods], and module wiring."
 ---
 
 This walkthrough builds a single-method gRPC service backed by an injected provider. Dependencies are listed in the [overview](/docs/grpc#installation).
@@ -15,7 +15,7 @@ This walkthrough builds a single-method gRPC service backed by an injected provi
 
 ```protobuf
 syntax = "proto3";
-package toni_examples.orders;
+package ulo_examples.orders;
 
 service Orders {
     rpc Create (CreateOrderRequest) returns (CreateOrderResponse);
@@ -31,17 +31,17 @@ message CreateOrderResponse { uint64 id = 1; string status = 2; }
 
 ### Compile it in build.rs
 
-Two steps, in order. `tonic-prost-build` compiles the proto into messages and a service trait; `toni_build::shapes` then reads that trait and writes what each method carries beside it.
+Two steps, in order. `tonic-prost-build` compiles the proto into messages and a service trait; `ulo_build::shapes` then reads that trait and writes what each method carries beside it.
 
 ```rust title="build.rs"
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::compile_protos("proto/orders.proto")?;
-    toni_build::shapes("toni_examples.orders")?;
+    ulo_build::shapes("ulo_examples.orders")?;
     Ok(())
 }
 ```
 
-`shapes` takes the same string `tonic::include_proto!` takes, and rewrites the file that macro includes in place: for a service `Orders` it appends an `orders_toni` module of marker types beside the `orders_server` module tonic wrote, one per rpc. `#[grpc_methods]` projects each method's request type through those markers — a macro runs before name resolution and cannot resolve a type it reads off a handler, so this is where the wire shape comes from. Skip the line and the macro expands to a path that does not exist.
+`shapes` takes the same string `tonic::include_proto!` takes, and rewrites the file that macro includes in place: for a service `Orders` it appends an `orders_ulo` module of marker types beside the `orders_server` module tonic wrote, one per rpc. `#[grpc_methods]` projects each method's request type through those markers — a macro runs before name resolution and cannot resolve a type it reads off a handler, so this is where the wire shape comes from. Skip the line and the macro expands to a path that does not exist.
 
 Re-running is safe: a second `shapes` call replaces its own section rather than appending another. A file with no service trait in it is an error, not a no-op.
 
@@ -55,12 +55,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("PROTOC", protoc);
     }
     tonic_prost_build::compile_protos("proto/orders.proto")?;
-    toni_build::shapes("toni_examples.orders")?;
+    ulo_build::shapes("ulo_examples.orders")?;
     Ok(())
 }
 ```
 
-For a trait tonic did not write — hand-written, or built through `tonic_build::manual` — use `toni_build::shapes_in_file(path)` and point it at the file that holds the trait.
+For a trait tonic did not write — hand-written, or built through `tonic_build::manual` — use `ulo_build::shapes_in_file(path)` and point it at the file that holds the trait.
 
 </Step>
 
@@ -75,11 +75,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use toni::extractors::Payload;
-use toni::{controller, grpc_methods, injectable, module, new, ToniFactory};
+use ulo::extractors::Payload;
+use ulo::{controller, grpc_methods, injectable, module, new, UloFactory};
 
 mod orders_pb {
-    tonic::include_proto!("toni_examples.orders");
+    tonic::include_proto!("ulo_examples.orders");
 }
 
 // An ordinary provider — nothing gRPC-specific about it.
@@ -101,7 +101,7 @@ impl OrdersCounter {
 
 // The failure a handler answers with. `kind()` decides the wire code:
 // BadRequest is INVALID_ARGUMENT here, 400 on HTTP.
-#[derive(Debug, toni::Error)]
+#[derive(Debug, ulo::Error)]
 enum OrderError {
     #[error_kind(BadRequest)]
     InvalidQty { qty: u32 },
@@ -148,14 +148,14 @@ Four rules govern that impl:
 
 - **Each handler is marked.** `#[grpc_method]` for a single reply, `#[grpc_stream]` for a streaming one. Anything unmarked stays exactly as written — the constructor, `#[on_*]` lifecycle hooks, private helpers.
 - **Every rpc the proto declares needs a handler.** The generated trait has no default bodies, so a missing one is an unimplemented-trait error at the impl.
-- **Every parameter is an extractor**, in any order: `Payload<T>` for the message, `Inbound<T>` for the caller's stream, `Extensions` for the execution's bag, `toni_grpc::GrpcRequest<T>` for the whole tonic request, or any [custom extractor](/docs/extractors/custom) over `GrpcContext`. The one parameter the macro reads by spelling is `&GrpcContext`, which passes through as the context itself rather than being extracted from it. Those first three all take the request, and it is taken once: two of them in one handler is a compile error naming both.
-- **The answer is your own type.** The reply message, or `Result<Reply, E>` where `E` implements `toni::Error`. Return `tonic::Response<T>` instead of the bare reply to set reply metadata; drop the `Result` entirely for a handler that cannot fail.
+- **Every parameter is an extractor**, in any order: `Payload<T>` for the message, `Inbound<T>` for the caller's stream, `Extensions` for the execution's bag, `ulo_grpc::GrpcRequest<T>` for the whole tonic request, or any [custom extractor](/docs/extractors/custom) over `GrpcContext`. The one parameter the macro reads by spelling is `&GrpcContext`, which passes through as the context itself rather than being extracted from it. Those first three all take the request, and it is taken once: two of them in one handler is a compile error naming both.
+- **The answer is your own type.** The reply message, or `Result<Reply, E>` where `E` implements `ulo::Error`. Return `tonic::Response<T>` instead of the bare reply to set reply metadata; drop the `Result` entirely for a handler that cannot fail.
 
-Nothing needs importing from the generated module. The macro names the trait's siblings — the `OrdersServer` wrapper and the `orders_toni` shapes — through the qualified path in the attribute.
+Nothing needs importing from the generated module. The macro names the trait's siblings — the `OrdersServer` wrapper and the `orders_ulo` shapes — through the qualified path in the attribute.
 
 `#[controller]` makes the struct a dispatch target: it goes in a module's `controllers` list like an HTTP or RPC controller, and it is not injectable. It is a singleton unless a dependency is request-scoped, in which case it auto-elevates and is built per call. There is no `OrdersServer::new(...)` and no `adapter.add_service(...)` in user code; the `controllers` entry is the entire wiring story.
 
-Two attribute options cover a generated layout that differs from the usual one. `#[grpc_methods(orders_pb::orders_server::Orders, server = path::to::OrdersServer)]` points at a wrapper with a non-standard name or location, and `shapes = path::to::orders_toni` points at a companion module written somewhere other than beside the trait.
+Two attribute options cover a generated layout that differs from the usual one. `#[grpc_methods(orders_pb::orders_server::Orders, server = path::to::OrdersServer)]` points at a wrapper with a non-standard name or location, and `shapes = path::to::orders_ulo` points at a companion module written somewhere other than beside the trait.
 
 </Step>
 
@@ -172,8 +172,8 @@ async fn main() {
     let local = tokio::task::LocalSet::new();
     local.run_until(async move {
         let addr: SocketAddr = "127.0.0.1:50051".parse().unwrap();
-        let mut app = ToniFactory::create(AppModule).await.unwrap();
-        app.use_grpc_adapter(toni_grpc::GrpcAdapter::new(addr)).unwrap();
+        let mut app = UloFactory::create(AppModule).await.unwrap();
+        app.use_grpc_adapter(ulo_grpc::GrpcAdapter::new(addr)).unwrap();
         app.start().await.unwrap();
     }).await;
 }
@@ -181,7 +181,7 @@ async fn main() {
 
 ### The LocalSet requirement
 
-`ToniFactory` and the application it builds are `!Send` — the DI container is `Rc`-based. Every gRPC example and integration test in the repository runs under `#[tokio::main(flavor = "current_thread")]` with a `tokio::task::LocalSet`, as above. Use this pattern for gRPC `main` functions; the remaining pages in this section assume it and show only the code inside `run_until`.
+`UloFactory` and the application it builds are `!Send` — the DI container is `Rc`-based. Every gRPC example and integration test in the repository runs under `#[tokio::main(flavor = "current_thread")]` with a `tokio::task::LocalSet`, as above. Use this pattern for gRPC `main` functions; the remaining pages in this section assume it and show only the code inside `run_until`.
 
 </Step>
 
@@ -193,7 +193,7 @@ async fn main() {
 grpcurl -plaintext \
     -d '{"item":"keyboard","qty":3}' \
     -proto proto/orders.proto -import-path proto \
-    127.0.0.1:50051 toni_examples.orders.Orders/Create
+    127.0.0.1:50051 ulo_examples.orders.Orders/Create
 ```
 
 ```json

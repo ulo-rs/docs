@@ -1,15 +1,15 @@
 ---
 title: Overview
-description: Contract-first gRPC with tonic — DI-registered services, extractor-shaped handlers, enhancers, and lifecycle integration via toni-grpc.
+description: Contract-first gRPC with tonic — DI-registered services, extractor-shaped handlers, enhancers, and lifecycle integration via ulo-grpc.
 ---
 
-`toni-grpc` drives a [tonic](https://docs.rs/tonic) server through Toni's bind / serve / drain lifecycle. A service is a `#[controller]` struct whose handlers live in an inherent impl marked `#[grpc_methods(proto::Trait)]`. DI discovers it and wraps every method with the enhancer pipeline — guards, interceptors, error handlers, and panic recovery — before handing it to tonic. There is no manual `*Server::new(handler)` step in user code.
+`ulo-grpc` drives a [tonic](https://docs.rs/tonic) server through Ulo's bind / serve / drain lifecycle. A service is a `#[controller]` struct whose handlers live in an inherent impl marked `#[grpc_methods(proto::Trait)]`. DI discovers it and wraps every method with the enhancer pipeline — guards, interceptors, error handlers, and panic recovery — before handing it to tonic. There is no manual `*Server::new(handler)` step in user code.
 
 ## Contract-first, not pattern-string
 
 The [RPC adapters](/docs/microservices) (TCP, NATS, and friends) route by pattern strings with JSON payloads resolved at runtime. gRPC is different by design: services and methods are declared in `.proto` files, known at compile time via tonic-generated traits, dispatched with typed protobuf messages, and support four call shapes (unary plus three streaming modes). None of that fits the pattern-string + JSON contract, so gRPC has its own adapter interface (`use_grpc_adapter`) and its own handler macro instead of the `#[patterns]` impl the RPC transports use.
 
-The `.proto` file is the source of truth, and `build.rs` turns it into Rust in two steps. `tonic-prost-build` compiles the messages and the service trait; `toni_build::shapes` then writes, beside that trait, what each method carries on the wire. The second step is what lets a handler take extractors: a macro runs before name resolution and cannot learn a method's request type by reading the handler, so `#[grpc_methods]` projects it through the companion instead. Your handlers stay an inherent impl — the macro writes the trait impl around them.
+The `.proto` file is the source of truth, and `build.rs` turns it into Rust in two steps. `tonic-prost-build` compiles the messages and the service trait; `ulo_build::shapes` then writes, beside that trait, what each method carries on the wire. The second step is what lets a handler take extractors: a macro runs before name resolution and cannot learn a method's request type by reading the handler, so `#[grpc_methods]` projects it through the companion instead. Your handlers stay an inherent impl — the macro writes the trait impl around them.
 
 <FromNest>
 There is no `protoLoader` and no runtime `.proto` parsing. The contract is
@@ -18,15 +18,15 @@ what the framework implements around your handlers — an rpc declared in the
 proto and left out of the service fails to compile. Guards, interceptors, and
 error handlers all apply here, at global, service, and method level; the global
 registrars are `use_global_grpc_guards`, `use_global_grpc_interceptors`, and
-`use_global_grpc_error_handler` on `ToniFactory`.
+`use_global_grpc_error_handler` on `UloFactory`.
 </FromNest>
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-grpc = "0.1"
+ulo = "0.2"
+ulo-grpc = "0.1"
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
@@ -34,13 +34,13 @@ tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"
-toni-build = "0.1"
+ulo-build = "0.1"
 protoc-bin-vendored = "3"   # optional — vendors protoc for the build
 ```
 
-`tonic-prost-build` generates the trait and message types at build time; `tonic-prost` and `prost` are their runtime counterparts. `toni-build` writes the method shapes `#[grpc_methods]` reads — without it the macro expands to a path that does not resolve. `protoc-bin-vendored` removes the system `protoc` requirement.
+`tonic-prost-build` generates the trait and message types at build time; `tonic-prost` and `prost` are their runtime counterparts. `ulo-build` writes the method shapes `#[grpc_methods]` reads — without it the macro expands to a path that does not resolve. `protoc-bin-vendored` removes the system `protoc` requirement.
 
-`toni-grpc` is a compile dependency, not only a serve dependency: the code `#[grpc_methods]` emits names `::toni_grpc::MethodShape`, so a crate that never mentions `GrpcAdapter` still needs the dependency. Its exports are `GrpcAdapter`, `GrpcRequest`, `MethodShape`, the `shape` module, and `to_status`. Two cargo features select the TLS crypto provider — `tls-ring` and `tls-aws-lc` — and nothing else on the crate is gated.
+`ulo-grpc` is a compile dependency, not only a serve dependency: the code `#[grpc_methods]` emits names `::ulo_grpc::MethodShape`, so a crate that never mentions `GrpcAdapter` still needs the dependency. Its exports are `GrpcAdapter`, `GrpcRequest`, `MethodShape`, the `shape` module, and `to_status`. Two cargo features select the TLS crypto provider — `tls-ring` and `tls-aws-lc` — and nothing else on the crate is gated.
 
 See the [quick start](/docs/grpc/quick-start) for the `build.rs` wiring end to end.
 

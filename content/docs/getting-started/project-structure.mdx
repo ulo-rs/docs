@@ -1,15 +1,15 @@
 ---
 title: Project Structure
-description: What the CLI generates and how to organize a Toni application as it grows.
+description: What the CLI generates and how to organize a Ulo application as it grows.
 ---
 
-## What `toni new` generates
+## What `ulo new` generates
 
 ```
 my_app/
-├── Cargo.toml                 # toni, toni-axum, tokio
+├── Cargo.toml                 # ulo, ulo-http-axum, tokio
 └── src/
-    ├── main.rs                # entry point — ToniFactory + adapter
+    ├── main.rs                # entry point — UloFactory + adapter
     └── app/
         ├── mod.rs             # #[path] module declarations
         ├── app.module.rs      # root module (AppModule)
@@ -34,7 +34,7 @@ pub mod app_service;
 
 ## Adding features with `generate resource`
 
-From the project root, `toni generate resource users` creates a feature directory and wires it in:
+From the project root, `ulo generate resource users` creates a feature directory and wires it in:
 
 ```
 src/
@@ -103,10 +103,10 @@ indirection. `forRoot()` carries over as `for_root`: integration crates return a
 Infrastructure that spans features — guards, interceptors, common types — belongs in a shared location (`common/` or `shared/`). Enhancers are plain structs implementing the relevant trait; the traits are generic over the transport context (`HttpContext`, `RpcContext`, `WsContext`).
 
 ```rust title="common/logging_interceptor.rs"
-use toni::HttpResponse;
-use toni::async_trait;
-use toni::context::HttpContext;
-use toni::traits_helpers::{Interceptor, InterceptorNext};
+use ulo::HttpResponse;
+use ulo::async_trait;
+use ulo::context::HttpContext;
+use ulo::traits_helpers::{Interceptor, InterceptorNext};
 
 pub struct LoggingInterceptor;
 
@@ -129,7 +129,7 @@ Register globally on the factory, before creating the application:
 ```rust
 use std::sync::Arc;
 
-let mut factory = ToniFactory::new();
+let mut factory = UloFactory::new();
 factory.use_global_http_interceptors(Arc::new(LoggingInterceptor));
 
 let mut app = factory.create_with(AppModule).await.unwrap();

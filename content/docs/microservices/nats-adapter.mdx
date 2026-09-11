@@ -11,19 +11,19 @@ Add the dependencies:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-nats = "0.1"
+ulo = "0.2"
+ulo-rpc-nats = "0.1"
 ```
 
 Register the adapter:
 
 ```rust
-use toni::ToniFactory;
-use toni_nats::NatsAdapter;
+use ulo::UloFactory;
+use ulo_rpc_nats::NatsAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(NatsAdapter::new("nats://127.0.0.1:4222"))?;
     app.start().await?;
     Ok(())
@@ -71,7 +71,7 @@ Handler errors arrive inside `response` as the canonical envelope; dispatch fail
 
 A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the request's reply inbox — `{"stream": ...}` items closed by `{"end": true}`.
 
-The client opens a stream on an inbox it subscribes explicitly rather than on the broker's native request, because that inbox has to outlive the first message. Dropping the reply stream, or letting its per-frame timeout expire, publishes `{"cancel": true, "key": "<inbox>"}` to the subject `toni.rpc.cancel`. Every server instance subscribes that subject **without** a queue group, so each sees every notice and only the instance holding the call acts on it.
+The client opens a stream on an inbox it subscribes explicitly rather than on the broker's native request, because that inbox has to outlive the first message. Dropping the reply stream, or letting its per-frame timeout expire, publishes `{"cancel": true, "key": "<inbox>"}` to the subject `ulo.rpc.cancel`. Every server instance subscribes that subject **without** a queue group, so each sees every notice and only the instance holding the call acts on it.
 
 <Callout type="warn">
 Call a streaming handler with `stream`, not `send`. `send` resolves on the first frame it receives and has nowhere to put the rest.
@@ -87,8 +87,8 @@ nats pub order.shipped '{"order_id":1001}'            # fire-and-forget
 ## Client transport
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_nats::NatsClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_nats::NatsClientTransport;
 
 provider_value!(
     "INVENTORY_CLIENT",
@@ -115,15 +115,15 @@ RpcClient::new(
 
 Unlike the TCP/UDP adapters, the NATS adapter has no drain timeout, no `with_max_inflight` backpressure cap, and no bound local address (`BoundAdapters.rpc` is `None`) — each inbound message spawns an unbounded task, and shutdown does not wait for in-flight handlers. There is no per-request `rpc.request` tracing span either. Broker-side limits (max payload, slow-consumer handling) apply as configured on the NATS server.
 
-Beyond the pattern subjects, the adapter subscribes one subject of its own: `toni.rpc.cancel`, carrying stream-cancel notices. It shows up on the wire and in subject-permission rules, so grant it alongside the patterns.
+Beyond the pattern subjects, the adapter subscribes one subject of its own: `ulo.rpc.cancel`, carrying stream-cancel notices. It shows up on the wire and in subject-permission rules, so grant it alongside the patterns.
 
 ## Combining HTTP and NATS
 
 ```rust
-use toni_axum::AxumAdapter;
-use toni_nats::NatsAdapter;
+use ulo_http_axum::AxumAdapter;
+use ulo_rpc_nats::NatsAdapter;
 
-let mut app = ToniFactory::create(AppModule).await?;
+let mut app = UloFactory::create(AppModule).await?;
 app.use_http_adapter(AxumAdapter::new(), ("0.0.0.0", 3000))?;
 app.use_rpc_adapter(NatsAdapter::new("nats://127.0.0.1:4222"))?;
 app.start().await?;

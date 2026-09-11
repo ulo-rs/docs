@@ -1,5 +1,5 @@
 ---
-title: toni-tcp
+title: ulo-rpc-tcp
 description: API reference for the TCP RPC adapter and client transport crate.
 ---
 
@@ -8,7 +8,7 @@ description: API reference for the TCP RPC adapter and client transport crate.
 Server-side RPC transport. Accepts inbound connections on a TCP port and dispatches newline-delimited JSON frames to registered RPC controllers.
 
 ```rust
-use toni_tcp::TcpAdapter;
+use ulo_rpc_tcp::TcpAdapter;
 
 TcpAdapter::new(host: impl Into<String>, port: u16) -> TcpAdapter
 TcpAdapter::from_listener(listener: std::net::TcpListener) -> TcpAdapter
@@ -20,10 +20,10 @@ TcpAdapter::new(...).with_max_inflight(max: usize) -> TcpAdapter                
 - `with_drain_timeout` — how long `close()` waits for in-flight requests before aborting them; `None` waits without bound.
 - `with_max_inflight` — caps concurrently running handler tasks across all connections. Over-cap request-response messages are rejected with an `"overloaded"` error frame; fire-and-forget messages are dropped with a log line.
 
-Register after `ToniFactory::create`:
+Register after `UloFactory::create`:
 
 ```rust
-let mut app = ToniFactory::create(AppModule).await.unwrap();
+let mut app = UloFactory::create(AppModule).await.unwrap();
 app.use_rpc_adapter(TcpAdapter::new("0.0.0.0", 4000)).unwrap();
 app.start().await.unwrap();
 ```
@@ -37,7 +37,7 @@ The listener binds synchronously during pattern registration, so a port conflict
 Client-side transport for `RpcClient`. Maintains a single persistent TCP connection with lazy connect and correlation-id-based request tracking.
 
 ```rust
-use toni_tcp::TcpClientTransport;
+use ulo_rpc_tcp::TcpClientTransport;
 
 TcpClientTransport::new(host: impl Into<String>, port: u16) -> TcpClientTransport
 TcpClientTransport::new(...).with_timeout(Duration) -> TcpClientTransport  // default: 5 s
@@ -88,7 +88,7 @@ Newline-delimited JSON (`\n` terminated). A request payload and a single reply c
 {"id": "1", "response": {...}}
 ```
 
-**Domain error** — a handler returning a type implementing `toni::Error` produces a wire-success frame carrying the canonical error envelope, not a wire error:
+**Domain error** — a handler returning a type implementing `ulo::Error` produces a wire-success frame carrying the canonical error envelope, not a wire error:
 ```json
 {"id": "1", "response": {"status": "error", "kind": "NotFound", "message": "...", "details": {...}}}
 ```

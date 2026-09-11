@@ -3,7 +3,7 @@ title: CORS
 description: Configuring cross-origin resource sharing for HTTP routes and WebSocket connections.
 ---
 
-CORS for HTTP and WebSockets work differently at the protocol level — Toni handles them as two separate concerns.
+CORS for HTTP and WebSockets work differently at the protocol level — Ulo handles them as two separate concerns.
 
 ## HTTP CORS
 
@@ -11,13 +11,13 @@ The built-in `CorsMiddleware` registers on the global chain — no extra depende
 
 ```rust
 use std::sync::Arc;
-use toni::ToniFactory;
-use toni::middleware::CorsMiddleware;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo::middleware::CorsMiddleware;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut factory = ToniFactory::new();
+    let mut factory = UloFactory::new();
     factory.use_global_middleware(Arc::new(CorsMiddleware::permissive()));
 
     let mut app = factory.create_with(AppModule).await.unwrap();
@@ -33,7 +33,7 @@ Global middleware runs before routing, so preflight `OPTIONS` requests are answe
 `CorsMiddleware::permissive()` is useful in development. For production, restrict origins, methods, and headers with `CorsOptions`:
 
 ```rust
-use toni::middleware::{AllowedOrigins, CorsMiddleware, CorsOptions};
+use ulo::middleware::{AllowedOrigins, CorsMiddleware, CorsOptions};
 
 let cors = CorsMiddleware::new(CorsOptions {
     origins: AllowedOrigins::List(vec![
@@ -67,17 +67,17 @@ Behavior worth knowing:
 
 WebSockets do not use CORS. There is no preflight — the browser upgrades the connection directly and sends an `Origin` header in the handshake. The server decides whether to accept or reject based on that header. `Access-Control-*` response headers are not checked by the browser for WebSocket connections.
 
-The right place to validate the `Origin` header in Toni is a **guard** on the gateway. Gateway-level guards run after the handshake and before `on_connect` fires. There is no HTTP status left to refuse with by then, so a refusal is delivered as frames: the client receives the canonical `{status, kind, message}` envelope, then a close frame.
+The right place to validate the `Origin` header in Ulo is a **guard** on the gateway. Gateway-level guards run after the handshake and before `on_connect` fires. There is no HTTP status left to refuse with by then, so a refusal is delivered as frames: the client receives the canonical `{status, kind, message}` envelope, then a close frame.
 
 A guard's `false` closes with 1008 (policy violation), the code RFC 6455 reserves for a rule the caller broke — it has none for authentication. An `on_connect` that returns `Err` picks its code from the error's kind: 1013 for `TooManyRequests`, 1008 for the other client-fault kinds, 1011 for anything else. `WsError::Refused { code, reason }` names a code directly and sends the close alone, with no envelope in front of it — that is how a protocol with a refusal code of its own, such as graphql-ws's 4406, is answered.
 
 A guard is an `#[injectable]` struct implementing `Guard<WsContext>`. The handshake headers live on the client as a plain `HashMap<String, String>` (header names lowercase):
 
 ```rust
-use toni::async_trait;
-use toni::context::WsContext;
-use toni::traits_helpers::Guard;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::WsContext;
+use ulo::traits_helpers::Guard;
+use ulo::injectable;
 
 #[injectable]
 pub struct OriginGuard;
@@ -100,8 +100,8 @@ The connection's session already exists while the guard runs, so a guard that de
 Apply it with `#[use_guards]` on the gateway's `#[subscriptions]` impl, and register both in the module:
 
 ```rust
-use toni::websocket::{WsClient, WsHandlerOutput, WsHandlerResult, WsMessage};
-use toni::{module, subscriptions, websocket_gateway};
+use ulo::websocket::{WsClient, WsHandlerOutput, WsHandlerResult, WsMessage};
+use ulo::{module, subscriptions, websocket_gateway};
 
 #[websocket_gateway("/chat")]
 pub struct ChatGateway;
@@ -126,11 +126,11 @@ A connection rejected by the guard closes before `on_connect` fires.
 Guards resolve through DI, so an origin allowlist can come from configuration:
 
 ```rust
-use toni::async_trait;
-use toni::context::WsContext;
-use toni::traits_helpers::Guard;
-use toni_config::ConfigService;
-use toni::injectable;
+use ulo::async_trait;
+use ulo::context::WsContext;
+use ulo::traits_helpers::Guard;
+use ulo_config::ConfigService;
+use ulo::injectable;
 
 #[injectable]
 pub struct OriginGuard {

@@ -1,6 +1,6 @@
 ---
 title: Clients
-description: Calling another gRPC service from inside a Toni application — the tonic-generated client as a provider, lazy connection, and header propagation.
+description: Calling another gRPC service from inside a Ulo application — the tonic-generated client as a provider, lazy connection, and header propagation.
 ---
 
 There is no client module and no client adapter. The tonic-generated client is a provider: registered under its own type with `provider_factory!`, resolved with a bare `#[inject]`, dropped by the container when the module goes.
@@ -10,7 +10,7 @@ An integration earns a module when something has to own a lifetime the container
 ## Registering one
 
 ```rust
-use toni::{module, provider_factory};
+use ulo::{module, provider_factory};
 use tonic::transport::Channel;
 
 use orders_pb::orders_client::OrdersClient;

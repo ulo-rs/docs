@@ -1,9 +1,9 @@
 ---
 title: MongoDB
-description: Integrating MongoDB with Toni's module system via the managed Database handle.
+description: Integrating MongoDB with Ulo's module system via the managed Database handle.
 ---
 
-`toni-mongodb` provides a `MongoModule` that connects to MongoDB at startup and makes `mongodb::Database` available application-wide via the global DI scope.
+`ulo-db-mongodb` provides a `MongoModule` that connects to MongoDB at startup and makes `mongodb::Database` available application-wide via the global DI scope.
 
 `for_root` is called once, in the root module. Feature modules inject `Database` without importing `MongoModule` themselves.
 
@@ -13,8 +13,8 @@ Add the dependency:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-mongodb = "0.1"
+ulo = "0.2"
+ulo-db-mongodb = "0.1"
 mongodb = "3"
 ```
 
@@ -23,7 +23,7 @@ mongodb = "3"
 Call `MongoModule::for_root` with the MongoDB URI and database name:
 
 ```rust
-use toni_mongodb::MongoModule;
+use ulo_db_mongodb::MongoModule;
 
 #[module(
     imports: [
@@ -37,14 +37,14 @@ pub struct AppModule;
 
 `for_root` returns a **global** `CheckedModule` — a `DynamicModule` carrying a configurable startup check. It works anywhere a module does: as an import or as the root module.
 
-The client itself is constructed lazily, without dialing. What verifies the server is the [startup check](#startup-check): it probes MongoDB in `on_module_init`, so an unreachable host surfaces as `Err(StartupError::HookFailed)` from `ToniFactory::create` — naming the module, with any password in the URI redacted (`mongodb://user:***@host:27017`) — rather than on the first query.
+The client itself is constructed lazily, without dialing. What verifies the server is the [startup check](#startup-check): it probes MongoDB in `on_module_init`, so an unreachable host surfaces as `Err(StartupError::HookFailed)` from `UloFactory::create` — naming the module, with any password in the URI redacted (`mongodb://user:***@host:27017`) — rather than on the first query.
 
 ## Startup check
 
 By default the module confirms MongoDB answers before the application starts: 3 attempts, 2 seconds apart, each bounded to 5 seconds — worst case ≈ 19 s. Tune the schedule with `with_startup_check`:
 
 ```rust
-use toni::StartupCheck;
+use ulo::StartupCheck;
 
 MongoModule::for_root(uri, "mydb")
     .with_startup_check(StartupCheck::default().attempts(5))
@@ -145,12 +145,12 @@ pub struct AppModule;
 
 ## Health checks
 
-Enable the `health` feature to have `for_root` also register a `MongoHealthIndicator`, which exposes `ping_check(key)` for use with `toni-terminus`. The indicator shares the registered database handle — enabling `health` opens no second client — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
+Enable the `health` feature to have `for_root` also register a `MongoHealthIndicator`, which exposes `ping_check(key)` for use with `ulo-health`. The indicator shares the registered database handle — enabling `health` opens no second client — and resolves it lazily on each check. See [Health checks](/docs/techniques/health).
 
 ## API reference
 
 ```rust
-use toni_mongodb::MongoModule;
+use ulo_db_mongodb::MongoModule;
 
 MongoModule::for_root(
     uri: impl Into<String>,
@@ -171,7 +171,7 @@ The returned `CheckedModule`:
 - is **global** (no need to import into feature modules)
 - carries the startup check — reconfigure with `.with_startup_check(StartupCheck)`, drop it with `.without_startup_check()`
 
-Re-exports available from `toni_mongodb`:
+Re-exports available from `ulo_db_mongodb`:
 - `mongodb::Collection`
 - `mongodb::Database`
 - `mongodb::bson::Document`

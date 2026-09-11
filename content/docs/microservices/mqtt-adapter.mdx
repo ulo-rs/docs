@@ -3,7 +3,7 @@ title: MQTT Adapter
 description: MQTT v5 topics as patterns — request-response via response_topic and correlation_data.
 ---
 
-`toni-mqtt` maps each RPC pattern to an MQTT topic. It uses MQTT **v5**, which carries request-response natively — a PUBLISH names a `response_topic` and `correlation_data` — so the message body is raw `RpcData` bytes and addressing lives in the PUBLISH properties. Built on `rumqttc`; a v5-capable broker must be reachable from both sides.
+`ulo-rpc-mqtt` maps each RPC pattern to an MQTT topic. It uses MQTT **v5**, which carries request-response natively — a PUBLISH names a `response_topic` and `correlation_data` — so the message body is raw `RpcData` bytes and addressing lives in the PUBLISH properties. Built on `rumqttc`; a v5-capable broker must be reachable from both sides.
 
 ## Server setup
 
@@ -11,19 +11,19 @@ Add the dependencies:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-mqtt = "0.1"
+ulo = "0.2"
+ulo-rpc-mqtt = "0.1"
 ```
 
 Register the adapter:
 
 ```rust
-use toni::ToniFactory;
-use toni_mqtt::MqttAdapter;
+use ulo::UloFactory;
+use ulo_rpc_mqtt::MqttAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(MqttAdapter::new("127.0.0.1", 1883))?;
     app.start().await?;
     Ok(())
@@ -49,7 +49,7 @@ Reply framing matches the other transports: `{"response": ...}` on success (hand
 
 A [streaming reply](/docs/microservices/rpc-controllers#streaming-replies) publishes one message per frame to the request's `response_topic`, echoing its `correlation_data` — `{"stream": ...}` items closed by `{"end": true}`.
 
-Cancel notices go to the topic `toni/rpc/cancel` at QoS 1, keyed by the call's correlation data. Every server instance subscribes it, so each sees every notice and only the instance holding the call acts on it.
+Cancel notices go to the topic `ulo/rpc/cancel` at QoS 1, keyed by the call's correlation data. Every server instance subscribes it, so each sees every notice and only the instance holding the call acts on it.
 
 <Callout type="warn">
 QoS 1 applies to stream frames as it does to everything else: a reconnect can redeliver an item the consumer already saw. A stream consumer here has to tolerate a repeated frame — the correlation data identifies the call, not the position in it.
@@ -58,8 +58,8 @@ QoS 1 applies to stream frames as it does to everything else: a reconnect can re
 ## Client transport
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_mqtt::MqttClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_mqtt::MqttClientTransport;
 
 provider_value!(
     "ORDERS_CLIENT",
@@ -67,7 +67,7 @@ provider_value!(
 )
 ```
 
-Connection is lazy on first use. Each transport instance subscribes one private reply topic, `toni/rpc/reply/{client-id}`, where the client id is `toni-mqtt-client-{pid}-{nanos}`. A background task drives the event loop, routing every reply back to its waiting call by `correlation_data`. The first call waits up to 5 seconds for the reply subscription to be acknowledged before publishing, so a reply cannot outrun the subscription that routes it.
+Connection is lazy on first use. Each transport instance subscribes one private reply topic, `ulo/rpc/reply/{client-id}`, where the client id is `ulo-mqtt-client-{pid}-{nanos}`. A background task drives the event loop, routing every reply back to its waiting call by `correlation_data`. The first call waits up to 5 seconds for the reply subscription to be acknowledged before publishing, so a reply cannot outrun the subscription that routes it.
 
 ### Custom timeout
 

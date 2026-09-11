@@ -1,13 +1,13 @@
 ---
 title: Dependency Injection
-description: How Toni's DI container resolves, instantiates, and shares providers.
+description: How Ulo's DI container resolves, instantiates, and shares providers.
 ---
 
-Toni includes a built-in dependency injection (DI) container. It resolves the dependency graph at startup, instantiates providers in the correct order, and wires everything together before the first request arrives.
+Ulo includes a built-in dependency injection (DI) container. It resolves the dependency graph at startup, instantiates providers in the correct order, and wires everything together before the first request arrives.
 
 ## How resolution works
 
-When `ToniFactory::create` runs:
+When `UloFactory::create` runs:
 
 1. The module tree is scanned recursively from the root module
 2. Each module's `providers` and `controllers` are registered with their dependency lists
@@ -19,7 +19,7 @@ Any failure in this phase — a missing provider, a circular dependency — come
 
 ## Provider tokens
 
-Every provider is identified by a **token**. The default token is the fully-qualified type name, and one function produces it: `toni::di::token_of::<T>()`. When you write `providers: [UsersService]`, the token is something like `"my_app::users::UsersService"`, and that's the string you'll see in resolution errors. An untagged `#[inject]` field resolves by its type's token; `#[inject("TOKEN")]` resolves by an explicit string token.
+Every provider is identified by a **token**. The default token is the fully-qualified type name, and one function produces it: `ulo::di::token_of::<T>()`. When you write `providers: [UsersService]`, the token is something like `"my_app::users::UsersService"`, and that's the string you'll see in resolution errors. An untagged `#[inject]` field resolves by its type's token; `#[inject("TOKEN")]` resolves by an explicit string token.
 
 Registration, injection, `resolve`, exports and library provider factories all go through `token_of`, so the two sides of a lookup are canonicalized the same way and the written spelling of a type stops mattering. `PgPool`, `Pool<Postgres>` and `my_db::Pool<Postgres>` produce one token: a generic handle registered under one spelling injects under whichever spelling is convenient at the field.
 
@@ -61,7 +61,7 @@ This scoping is enforced at startup. Attempting to inject a provider that isn't 
 After the application is created, you can pull instances directly from the container. This is useful for scripting, CLI tools, and testing.
 
 ```rust
-let app = ToniFactory::create(AppModule).await?;
+let app = UloFactory::create(AppModule).await?;
 
 // By type, searching every module
 let users_service = app.get::<UsersService>().await?;
@@ -73,7 +73,7 @@ let db_pool = app.get_by_token::<Pool>("DB_POOL").await?;
 A `Token<T>` const carries the result type with the name, so the turbofish falls away and asking for the wrong type is a compile error rather than a downcast failure at runtime:
 
 ```rust
-use toni::di::Token;
+use ulo::di::Token;
 
 pub const APP_NAME: Token<String> = Token::new("APP_NAME");
 
@@ -92,7 +92,7 @@ let service = module.get::<UsersService>().await?;
 
 `get_module::<M>()` matches on the module's [identity base](/docs/core-concepts/modules#identity-and-deduplication) — `token_of::<M>()`, fingerprinted or not.
 
-`get_module_by_id` takes an identity instead of a type, which is what reaches a module that has no type to name: a `DynamicModule`'s base is the name its builder was given, so `SeaOrmModule::for_root(url)` is reached as `get_module_by_id("SeaOrmModule")`. A `#[module]` struct's base is its fully-qualified path, so `"UsersModule"` finds nothing there — pass `toni::di::token_of::<UsersModule>()`, or use `get_module::<UsersModule>()` and skip the string.
+`get_module_by_id` takes an identity instead of a type, which is what reaches a module that has no type to name: a `DynamicModule`'s base is the name its builder was given, so `SeaOrmModule::for_root(url)` is reached as `get_module_by_id("SeaOrmModule")`. A `#[module]` struct's base is its fully-qualified path, so `"UsersModule"` finds nothing there — pass `ulo::di::token_of::<UsersModule>()`, or use `get_module::<UsersModule>()` and skip the string.
 
 Two configurations of one maker share a base and differ by fingerprint, so the bare base is ambiguous and the error lists the full keys:
 
@@ -106,18 +106,18 @@ Passing one of those keys addresses that one module:
 let primary = app.get_module_by_id("SeaOrmModule#3f2a1c94b7e05d68").await?;
 ```
 
-A fingerprint is deterministic within one build, not across toolchains — read it out of an error to find a module during debugging, don't commit it. Both methods exist on `ToniApplication` and on `ToniApplicationContext`.
+A fingerprint is deterministic within one build, not across toolchains — read it out of an error to find a module during debugging, don't commit it. Both methods exist on `UloApplication` and on `UloApplicationContext`.
 
 ## Standalone application context
 
 For workers, cron jobs, CLI commands, and tests — situations where you want the DI container without an HTTP server:
 
 ```rust
-use toni::ToniFactory;
+use ulo::UloFactory;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut ctx = ToniFactory::create_application_context(AppModule).await?;
+    let mut ctx = UloFactory::create_application_context(AppModule).await?;
 
     // Resolve services normally
     let users_service = ctx.get::<UsersService>().await?;
@@ -138,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
 `get` refuses request-scoped providers, since there is no active execution — the error names the provider and points at `resolve` and `ProviderContext::standalone()`. To exercise one outside a handler, build a transportless execution and resolve against it:
 
 ```rust
-use toni::ProviderContext;
+use ulo::ProviderContext;
 
 let execution = ProviderContext::standalone();
 let service = ctx.resolve::<RequestScopedService>(&execution).await?;
@@ -151,7 +151,7 @@ Two resolutions against the same execution share one instance; two executions bu
 
 ## Executions
 
-Request scope is measured in **executions**: one HTTP request, one WebSocket message, one RPC or gRPC call, or one standalone execution built with `ProviderContext::standalone()`. Within an execution the `ExecutionCache` guarantees one *construction* per request-scoped provider, and every injection site receives a clone of that build. State that must be visible across sites therefore lives behind a shared handle such as `Arc<Mutex<_>>`; mutating a plain field mutates only that site's copy. `resolve` takes the execution on `ToniApplication`, `ToniApplicationContext`, and `ModuleRef` alike, and a service holding a `ModuleRef` reaches request-scoped providers the same way.
+Request scope is measured in **executions**: one HTTP request, one WebSocket message, one RPC or gRPC call, or one standalone execution built with `ProviderContext::standalone()`. Within an execution the `ExecutionCache` guarantees one *construction* per request-scoped provider, and every injection site receives a clone of that build. State that must be visible across sites therefore lives behind a shared handle such as `Arc<Mutex<_>>`; mutating a plain field mutates only that site's copy. `resolve` takes the execution on `UloApplication`, `UloApplicationContext`, and `ModuleRef` alike, and a service holding a `ModuleRef` reaches request-scoped providers the same way.
 
 ## Request data in the DI graph
 
@@ -260,7 +260,7 @@ impl ServiceB {
 
 <FromNest>
 There is no `forwardRef`, and none is needed. `forwardRef` defers a class
-reference that is `undefined` at module-evaluation time. Toni identifies
+reference that is `undefined` at module-evaluation time. Ulo identifies
 providers by string token and resolves them at runtime, so a reference is never
 undefined and there is nothing to defer. A reported cycle is a real construction
 cycle — break it rather than look for the escape hatch.

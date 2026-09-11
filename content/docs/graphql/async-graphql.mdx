@@ -1,18 +1,18 @@
 ---
 title: async-graphql Integration
-description: Use toni-async-graphql to add a GraphQL endpoint powered by the async-graphql crate.
+description: Use ulo-graphql-async-graphql to add a GraphQL endpoint powered by the async-graphql crate.
 ---
 
-`toni-async-graphql` integrates Toni's module system with the [async-graphql](https://github.com/async-graphql/async-graphql) crate. A `ContextBuilder` populates the `async-graphql` `Data` container per-request, so resolvers can access injected Toni services.
+`ulo-graphql-async-graphql` integrates Ulo's module system with the [async-graphql](https://github.com/async-graphql/async-graphql) crate. A `ContextBuilder` populates the `async-graphql` `Data` container per-request, so resolvers can access injected Ulo services.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-async-graphql = "0.1"
+ulo = "0.2"
+ulo-graphql-async-graphql = "0.1"
 async-graphql = "7"
-toni-axum = "0.1"
+ulo-http-axum = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -48,8 +48,8 @@ The builder is passed by value to `for_root` — it is not resolved through the 
 ```rust
 use async_graphql::Data;
 use async_trait::async_trait;
-use toni::RequestPart;
-use toni_async_graphql::ContextBuilder;
+use ulo::RequestPart;
+use ulo_graphql_async_graphql::ContextBuilder;
 
 pub struct AppContextBuilder {
     users_service: UsersService,
@@ -74,7 +74,7 @@ impl ContextBuilder for AppContextBuilder {
 When you don't need context data, use the built-in `DefaultContextBuilder`:
 
 ```rust
-use toni_async_graphql::{GraphQLModule, DefaultContextBuilder};
+use ulo_graphql_async_graphql::{GraphQLModule, DefaultContextBuilder};
 
 let graphql_module = GraphQLModule::for_root(schema, DefaultContextBuilder);
 ```
@@ -84,7 +84,7 @@ let graphql_module = GraphQLModule::for_root(schema, DefaultContextBuilder);
 Module `imports` entries are expressions, so a helper function that builds the schema and the context builder keeps the declaration readable:
 
 ```rust
-use toni_async_graphql::GraphQLModule;
+use ulo_graphql_async_graphql::GraphQLModule;
 
 fn graphql_module() -> GraphQLModule<QueryRoot, EmptyMutation, EmptySubscription, AppContextBuilder> {
     let schema = Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish();
@@ -102,12 +102,12 @@ pub struct AppModule;
 ## 4. Wire up in main
 
 ```rust
-use toni::ToniFactory;
-use toni_axum::AxumAdapter;
+use ulo::UloFactory;
+use ulo_http_axum::AxumAdapter;
 
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -154,7 +154,7 @@ impl ContextBuilder for AppContextBuilder {
 `GraphQLModule` exports the executor behind the endpoint under the token `"GraphQLService"`. A module that imports the GraphQL module can inject it and run a document without going through HTTP — a scheduled job, or a second protocol in front of the same schema:
 
 ```rust
-use toni_async_graphql::{DefaultContextBuilder, GraphQLService};
+use ulo_graphql_async_graphql::{DefaultContextBuilder, GraphQLService};
 
 type AppGraphQL = GraphQLService<QueryRoot, EmptyMutation, EmptySubscription, DefaultContextBuilder>;
 
@@ -198,8 +198,8 @@ Use `.with_subscription_context()` to inject per-connection data into subscripti
 use async_graphql::Data;
 use async_trait::async_trait;
 use serde_json::Value;
-use toni::WsClient;
-use toni_async_graphql::SubscriptionContextBuilder;
+use ulo::WsClient;
+use ulo_graphql_async_graphql::SubscriptionContextBuilder;
 
 pub struct AppSubscriptionContextBuilder {
     auth_service: AuthService,
@@ -267,7 +267,7 @@ pub type AppSchema = Schema<QueryRoot, EmptyMutation, SubscriptionRoot>;
 ## API reference
 
 ```rust
-use toni_async_graphql::{GraphQLModule, ContextBuilder, DefaultContextBuilder,
+use ulo_graphql_async_graphql::{GraphQLModule, ContextBuilder, DefaultContextBuilder,
                          SubscriptionContextBuilder, DefaultSubscriptionContextBuilder};
 
 // Module builder

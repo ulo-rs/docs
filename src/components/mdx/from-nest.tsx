@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 
 /**
- * A collapsed aside carrying one NestJS-to-Toni translation.
+ * A collapsed aside carrying one NestJS-to-Ulo translation.
  *
  * Built on `<details>` rather than the fumadocs Accordion on purpose: Radix
  * unmounts closed content, which would keep these blocks out of the prerendered
  * HTML and out of search results. `<details>` keeps them in the DOM, closed.
  *
- * Reach for it only where a NestJS habit produces wrong Toni code and the
+ * Reach for it only where a NestJS habit produces wrong Ulo code and the
  * correction is local to the page. The full decorator-to-macro map lives on
  * /docs/coming-from-nestjs and is not repeated here.
  */

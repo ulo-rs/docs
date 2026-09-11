@@ -1,20 +1,20 @@
 ---
 title: Juniper Integration
-description: Use toni-juniper to add a GraphQL endpoint powered by the juniper crate, with a strongly-typed context.
+description: Use ulo-graphql-juniper to add a GraphQL endpoint powered by the juniper crate, with a strongly-typed context.
 ---
 
-`toni-juniper` integrates Toni with the [Juniper](https://github.com/graphql-rust/juniper) GraphQL library. Unlike `toni-async-graphql`, Juniper uses a concrete, user-defined context type — every resolver receives your context struct directly, giving you full compile-time type safety.
+`ulo-graphql-juniper` integrates Ulo with the [Juniper](https://github.com/graphql-rust/juniper) GraphQL library. Unlike `ulo-graphql-async-graphql`, Juniper uses a concrete, user-defined context type — every resolver receives your context struct directly, giving you full compile-time type safety.
 
-The module mounts one HTTP endpoint: POST for queries and mutations, GET for the playground. It serves no subscriptions — the schema's subscription root is part of the module's type, but nothing carries subscription operations over a WebSocket. [`toni-async-graphql`](/docs/graphql/async-graphql#subscriptions) is the integration that does.
+The module mounts one HTTP endpoint: POST for queries and mutations, GET for the playground. It serves no subscriptions — the schema's subscription root is part of the module's type, but nothing carries subscription operations over a WebSocket. [`ulo-graphql-async-graphql`](/docs/graphql/async-graphql#subscriptions) is the integration that does.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-juniper = "0.1"
+ulo = "0.2"
+ulo-graphql-juniper = "0.1"
 juniper = "0.16"
-toni-axum = "0.1"
+ulo-http-axum = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -67,8 +67,8 @@ The builder is passed by value to `for_root` — it is not resolved through the 
 
 ```rust
 use async_trait::async_trait;
-use toni::RequestPart;
-use toni_juniper::ContextBuilder;
+use ulo::RequestPart;
+use ulo_graphql_juniper::ContextBuilder;
 
 pub struct AppContextBuilder {
     users_service: UsersService,
@@ -97,7 +97,7 @@ impl ContextBuilder for AppContextBuilder {
 When you don't need context data, use the built-in `DefaultContextBuilder` and `DefaultContext`:
 
 ```rust
-use toni_juniper::{GraphQLModule, DefaultContextBuilder, DefaultContext};
+use ulo_graphql_juniper::{GraphQLModule, DefaultContextBuilder, DefaultContext};
 
 // DefaultContext implements juniper::Context and is the context type
 // when using DefaultContextBuilder
@@ -108,7 +108,7 @@ use toni_juniper::{GraphQLModule, DefaultContextBuilder, DefaultContext};
 Module `imports` entries are expressions, so a helper function keeps the declaration readable:
 
 ```rust
-use toni_juniper::GraphQLModule;
+use ulo_graphql_juniper::GraphQLModule;
 use juniper::{EmptyMutation, EmptySubscription, RootNode};
 
 fn graphql_module() -> GraphQLModule<
@@ -135,7 +135,7 @@ pub struct AppModule;
 ```rust
 #[tokio::main]
 async fn main() {
-    let mut app = ToniFactory::create(AppModule).await.unwrap();
+    let mut app = UloFactory::create(AppModule).await.unwrap();
     app.use_http_adapter(AxumAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await.unwrap();
 }
@@ -156,7 +156,7 @@ Changing only the context builder does not merge two modules onto one path; it m
 `GraphQLModule` exports the executor behind the endpoint under the token `"GraphQLService"`. A module that imports the GraphQL module can inject it and run a document without going through HTTP:
 
 ```rust
-use toni_juniper::GraphQLService;
+use ulo_graphql_juniper::GraphQLService;
 
 type AppGraphQL = GraphQLService<
     QueryRoot,
@@ -178,7 +178,7 @@ The registration token is that string, so a bare `#[inject]` by type does not re
 
 ## Comparison with async-graphql
 
-|             | `toni-async-graphql`          | `toni-juniper`              |
+|             | `ulo-graphql-async-graphql`          | `ulo-graphql-juniper`              |
 | ----------- | ----------------------------- | --------------------------- |
 | Context     | `Data` (type-erased map)      | Concrete struct (your type) |
 | Type safety | Runtime lookup                | Compile-time                |

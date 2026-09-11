@@ -14,7 +14,7 @@ service Orders {
 }
 ```
 
-`OrderError` below is the service's own error type, implementing `toni::Error` — see [error handling](/docs/grpc/error-handling).
+`OrderError` below is the service's own error type, implementing `ulo::Error` — see [error handling](/docs/grpc/error-handling).
 
 ## Unary
 
@@ -41,7 +41,7 @@ async fn create(
 `#[grpc_stream]` marks the reply as a stream. The return type is written as `impl Stream<Item = …>` and the item type is read from that `Item` binding, so it has to be spelled there — a type alias standing in for the stream leaves the macro nothing to read. Items are `Result<Reply, E>` with the same error type the handler answers with:
 
 ```rust
-use toni::futures::Stream;
+use ulo::futures::Stream;
 
 #[grpc_stream]
 async fn watch_progress(
@@ -52,7 +52,7 @@ async fn watch_progress(
     OrderError,
 > {
     let id = req.id;
-    Ok(toni::futures::stream::iter(
+    Ok(ulo::futures::stream::iter(
         ["queued", "picked", "shipped"].into_iter().map(move |status| {
             Ok(orders_pb::ProgressEvent { id, status: status.to_string() })
         }),
@@ -84,8 +84,8 @@ A stream that cannot fail to open drops the outer `Result` and returns `impl Str
 The caller's stream arrives as `Inbound<T>`, which yields the message type — not tonic's `Streaming`. An item fails when the caller's stream does: a dropped connection, a message that will not decode. The failure is a `GrpcStatus`, so the handler names nothing from the wire crate. The reply is a single message, so the handler is a plain `#[grpc_method]`:
 
 ```rust
-use toni::extractors::Inbound;
-use toni::futures::StreamExt;
+use ulo::extractors::Inbound;
+use ulo::futures::StreamExt;
 
 #[grpc_method]
 async fn bulk_create(
@@ -102,14 +102,14 @@ async fn bulk_create(
 }
 ```
 
-A handler that answers `Result<Reply, GrpcStatus>` can write `item?` instead of mapping — `GrpcStatus` implements `toni::Error`, so it is a handler error type like any other.
+A handler that answers `Result<Reply, GrpcStatus>` can write `item?` instead of mapping — `GrpcStatus` implements `ulo::Error`, so it is a handler error type like any other.
 
 ## Bidirectional streaming
 
 Both halves at once: `Inbound<T>` for what arrives, `#[grpc_stream]` for what goes back.
 
 ```rust
-use toni::futures::StreamExt;
+use ulo::futures::StreamExt;
 
 #[grpc_stream]
 async fn chat(
@@ -141,7 +141,7 @@ A streaming reply outlives the handler that returned it, and whatever feeds it �
 ```rust
 use std::time::Duration;
 
-use toni::context::{GrpcContext, HandlerContext};
+use ulo::context::{GrpcContext, HandlerContext};
 
 #[grpc_stream]
 async fn watch_progress(
@@ -173,7 +173,7 @@ async fn watch_progress(
 
 Without that select, the task keeps producing into a channel nobody reads. `cancellation()` comes from the `HandlerContext` trait, so that trait has to be in scope; a buffered unary reply never fires the token, because there is nothing to abandon.
 
-`Stream` and `StreamExt` above come from `toni::futures`, which re-exports the `futures` crate — no separate dependency. The channel wrapper is `tokio-stream`.
+`Stream` and `StreamExt` above come from `ulo::futures`, which re-exports the `futures` crate — no separate dependency. The channel wrapper is `tokio-stream`.
 
 ## Enhancers and streams
 

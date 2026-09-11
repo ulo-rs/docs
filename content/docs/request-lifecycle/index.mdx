@@ -28,7 +28,7 @@ Enhancers are generic over the per-request context. `Guard<HttpContext>` runs on
 
 Guards, interceptors, and error handlers apply at three scopes, in execution order:
 
-1. **Global** — registered per transport on `ToniFactory`. Guards and interceptors take `use_global_{http,rpc,ws,grpc}_{guards,interceptors}`; error handlers take `use_global_{http,rpc,ws,grpc}_error_handler`. Middleware has a single global registration, `use_global_middleware`, because it is HTTP-only.
+1. **Global** — registered per transport on `UloFactory`. Guards and interceptors take `use_global_{http,rpc,ws,grpc}_{guards,interceptors}`; error handlers take `use_global_{http,rpc,ws,grpc}_error_handler`. Middleware has a single global registration, `use_global_middleware`, because it is HTTP-only.
 2. **Controller** — `#[use_guards]` etc. on the `#[routes]` impl block (or `#[patterns]` / `#[subscriptions]` / `#[grpc_methods]`), applies to every handler in it
 3. **Method** — the same attributes on a specific handler
 

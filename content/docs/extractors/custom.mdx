@@ -38,7 +38,7 @@ A header extractor — metadata only, so it borrows `ctx.request()`:
 
 ```rust
 use std::fmt;
-use toni::{FromContext, HttpContext};
+use ulo::{FromContext, HttpContext};
 
 #[derive(Debug, Clone)]
 pub struct BearerToken(pub String);
@@ -95,8 +95,8 @@ A custom extractor can call other extractors on the same context. Built-ins like
 
 ```rust
 use serde::Deserialize;
-use toni::{FromContext, HttpContext};
-use toni::extractors::Query;
+use ulo::{FromContext, HttpContext};
+use ulo::extractors::Query;
 
 pub struct Pagination {
     pub page: u32,
@@ -146,8 +146,8 @@ An extractor that reads the body declares `CONSUMES` and starts with `take_body`
 ```rust
 use std::fmt;
 use serde::de::DeserializeOwned;
-use toni::{FromContext, HttpContext, take_body};
-use toni::extractors::BodyExtractionError;
+use ulo::{FromContext, HttpContext, take_body};
+use ulo::extractors::BodyExtractionError;
 
 /// Deserializes the body as YAML (via the `serde_yaml` crate).
 pub struct Yaml<T>(pub T);
@@ -212,7 +212,7 @@ pub trait ValidatableExtractor {
 Implement it on your extractor to opt in:
 
 ```rust
-use toni::extractors::ValidatableExtractor;
+use ulo::extractors::ValidatableExtractor;
 
 impl<T: validator::Validate> ValidatableExtractor for Yaml<T> {
     type Inner = T;
@@ -226,7 +226,7 @@ impl<T: validator::Validate> ValidatableExtractor for Yaml<T> {
 // Validated(Yaml(dto)): Validated<Yaml<CreateUserDto>>
 ```
 
-On failure, `Validated` produces `ValidationError` (exported alongside `ValidatableExtractor` from `toni::extractors`): `ExtractionError` when the inner extractor failed, `ValidationFailed` carrying the `validator::ValidationErrors` when a rule was violated. Both surface as the standard 400 extraction response.
+On failure, `Validated` produces `ValidationError` (exported alongside `ValidatableExtractor` from `ulo::extractors`): `ExtractionError` when the inner extractor failed, `ValidationFailed` carrying the `validator::ValidationErrors` when a rule was violated. Both surface as the standard 400 extraction response.
 
 ## Other transports
 
@@ -242,7 +242,7 @@ Three of the framework's extractors are not tied to HTTP:
 
 `Inbound<T>` is gRPC-only: the caller's stream, for a client-streaming or bidirectional method. On HTTP there is no `Payload<T>` — the payload is the request body, and `Json<T>`, `Body<T>`, `Bytes`, and `BodyStream` name it more precisely.
 
-`CONSUMES` means something on gRPC too, where the request is taken from the execution once: `Payload<T>`, `Inbound<T>`, and `toni_grpc::GrpcRequest<T>` each declare it, and two of them in one handler is the same compile error naming both parameters. A WebSocket frame and an RPC call's data are buffered and read freely, so nothing on those two transports consumes.
+`CONSUMES` means something on gRPC too, where the request is taken from the execution once: `Payload<T>`, `Inbound<T>`, and `ulo_grpc::GrpcRequest<T>` each declare it, and two of them in one handler is the same compile error naming both parameters. A WebSocket frame and an RPC call's data are buffered and read freely, so nothing on those two transports consumes.
 
 The context itself is not extracted. A handler takes `&HttpContext`, `&WsContext`, `&RpcContext`, or `&GrpcContext` as an ordinary parameter and the framework passes it through, in any position.
 

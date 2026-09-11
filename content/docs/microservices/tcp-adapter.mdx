@@ -11,19 +11,19 @@ Add the dependencies:
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-tcp = "0.1"
+ulo = "0.2"
+ulo-rpc-tcp = "0.1"
 ```
 
 Register the adapter after creating the application:
 
 ```rust
-use toni::ToniFactory;
-use toni_tcp::TcpAdapter;
+use ulo::UloFactory;
+use ulo_rpc_tcp::TcpAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
+    let mut app = UloFactory::create(AppModule).await?;
     app.use_rpc_adapter(TcpAdapter::new("0.0.0.0", 4000))?;
     app.start().await?;
     Ok(())
@@ -110,8 +110,8 @@ echo '{"pattern":"order.create","data":{"item":"keyboard","qty":3},"id":"req-1"}
 `TcpClientTransport` maintains one persistent connection to the remote server. Request-response multiplexes over it via correlation ids; a background reader routes each reply to the waiting caller:
 
 ```rust
-use toni::{provider_value, RpcClient};
-use toni_tcp::TcpClientTransport;
+use ulo::{provider_value, RpcClient};
+use ulo_rpc_tcp::TcpClientTransport;
 
 provider_value!(
     "ORDERS_CLIENT",
@@ -149,7 +149,7 @@ Every inbound message runs inside an `rpc.request` span with `transport="tcp"`, 
 ## Example
 
 ```rust
-use toni::{controller, injectable, module, new, patterns, serde_json, ToniFactory};
+use ulo::{controller, injectable, module, new, patterns, serde_json, UloFactory};
 
 #[injectable]
 pub struct OrdersService {}
@@ -175,23 +175,23 @@ impl OrdersController {
     #[message_pattern("order.create")]
     async fn create(
         &self,
-        data: toni::RpcData,
-        _ctx: &toni::RpcContext,
-    ) -> Result<toni::RpcData, toni::RpcError> {
+        data: ulo::RpcData,
+        _ctx: &ulo::RpcContext,
+    ) -> Result<ulo::RpcData, ulo::RpcError> {
         let payload = data
             .as_json()
-            .ok_or_else(|| toni::RpcError::Internal("expected JSON payload".into()))?;
+            .ok_or_else(|| ulo::RpcError::Internal("expected JSON payload".into()))?;
         let item = payload["item"].as_str().unwrap_or("unknown");
         let qty = payload["qty"].as_u64().unwrap_or(1) as u32;
-        Ok(toni::RpcData::json(self.service.create_order(item, qty)))
+        Ok(ulo::RpcData::json(self.service.create_order(item, qty)))
     }
 
     #[event_pattern("order.shipped")]
     async fn shipped(
         &self,
-        data: toni::RpcData,
-        _ctx: &toni::RpcContext,
-    ) -> Result<(), toni::RpcError> {
+        data: ulo::RpcData,
+        _ctx: &ulo::RpcContext,
+    ) -> Result<(), ulo::RpcError> {
         let order_id = data.as_json().and_then(|v| v["order_id"].as_u64()).unwrap_or(0);
         println!("order {order_id} shipped");
         Ok(())
@@ -203,8 +203,8 @@ struct AppModule;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::create(AppModule).await?;
-    app.use_rpc_adapter(toni_tcp::TcpAdapter::new("0.0.0.0", 4000))?;
+    let mut app = UloFactory::create(AppModule).await?;
+    app.use_rpc_adapter(ulo_rpc_tcp::TcpAdapter::new("0.0.0.0", 4000))?;
     app.start().await?;
     Ok(())
 }

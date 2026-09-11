@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const TITLE = "Toni — a modular Rust framework for server applications";
+const TITLE = "Ulo — a modular Rust framework for server applications";
 const DESCRIPTION =
-  "Toni organizes Rust server applications into modules, controllers, and injectable services, with guards, interceptors, and pipes on HTTP, WebSocket, RPC, and gRPC alike. Bring your own HTTP server: Axum, Actix, Salvo, Poem, and Rocket adapters ship with it.";
+  "Ulo organizes Rust server applications into modules, controllers, and injectable services, with guards, interceptors, and pipes on HTTP, WebSocket, RPC, and gRPC alike. Bring your own HTTP server: Axum, Actix, Salvo, Poem, and Rocket adapters ship with it.";
 
 // Set NEXT_PUBLIC_SITE_URL to the deployed origin so shared links resolve the
 // OG image. Vercel supplies its own production host; localhost is the fallback
@@ -28,11 +28,11 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: { template: "%s | Toni", default: TITLE },
+  title: { template: "%s | Ulo", default: TITLE },
   description: DESCRIPTION,
   openGraph: {
     type: "website",
-    siteName: "Toni",
+    siteName: "Ulo",
     title: TITLE,
     description: DESCRIPTION,
     url: "/",

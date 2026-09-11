@@ -1,35 +1,35 @@
 ---
 title: Poem Adapter
-description: Using the toni-poem adapter — setup, WebSocket support, streaming, and graceful shutdown.
+description: Using the ulo-http-poem adapter — setup, WebSocket support, streaming, and graceful shutdown.
 ---
 
-The `toni-poem` crate wraps [Poem](https://crates.io/crates/poem) 3.1 to handle HTTP for Toni applications. It implements both `HttpAdapter` and `WebSocketAdapter`, so a single adapter type covers HTTP routes, same-port WebSocket upgrades, and separate-port WebSocket servers. Bodies stream in both directions.
+The `ulo-http-poem` crate wraps [Poem](https://crates.io/crates/poem) 3.1 to handle HTTP for Ulo applications. It implements both `HttpAdapter` and `WebSocketAdapter`, so a single adapter type covers HTTP routes, same-port WebSocket upgrades, and separate-port WebSocket servers. Bodies stream in both directions.
 
 ## Installation
 
 ```toml title="Cargo.toml"
 [dependencies]
-toni = "0.2"
-toni-poem = "0.1"
+ulo = "0.2"
+ulo-http-poem = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
 ## Basic setup
 
 ```rust
-use toni::*;
-use toni_poem::PoemAdapter;
+use ulo::*;
+use ulo_http_poem::PoemAdapter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut app = ToniFactory::new().create_with(AppModule).await?;
+    let mut app = UloFactory::new().create_with(AppModule).await?;
     app.use_http_adapter(PoemAdapter::new(), ("127.0.0.1", 3000)).unwrap();
     app.start().await?;
     Ok(())
 }
 ```
 
-Toni's `{param}` path syntax is rewritten to Poem's `:param` form at mount time. Every standard method has a direct mapping (`GET` through `TRACE` and `CONNECT`), and dispatch is exact-match. The adapter mounts no catch-all: a `/*` route would shadow an exact route at `/` in Poem's router. Unmatched paths therefore surface as the router's `NotFoundError`, which the global-chain wrapper maps to Toni's standard 404 envelope.
+Ulo's `{param}` path syntax is rewritten to Poem's `:param` form at mount time. Every standard method has a direct mapping (`GET` through `TRACE` and `CONNECT`), and dispatch is exact-match. The adapter mounts no catch-all: a `/*` route would shadow an exact route at `/` in Poem's router. Unmatched paths therefore surface as the router's `NotFoundError`, which the global-chain wrapper maps to Ulo's standard 404 envelope.
 
 ## WebSocket support
 
@@ -44,11 +44,11 @@ app.use_websocket_adapter(PoemAdapter::new()).unwrap();
 
 ## Streaming bodies
 
-Poem's `Body` is a thin newtype around the same `http-body` family Toni uses internally, so the bridge is nearly free in both directions:
+Poem's `Body` is a thin newtype around the same `http-body` family Ulo uses internally, so the bridge is nearly free in both directions:
 
 - **Requests** are handed through unbuffered. `BodyStream` sees frames as they arrive; `Bytes`, `Json`, and friends collect on demand.
 - **Responses** built with `Body::stream(...)` reach the client chunk by chunk, so [SSE](/docs/techniques/sse) and long-lived streaming responses work without buffering.
 
 ## Graceful shutdown
 
-Poem exposes `run_with_graceful_shutdown` natively; the adapter feeds Toni's shutdown signal into it, and the HTTP server and any separate-port WebSocket servers stop in response to the same signal. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
+Poem exposes `run_with_graceful_shutdown` natively; the adapter feeds Ulo's shutdown signal into it, and the HTTP server and any separate-port WebSocket servers stop in response to the same signal. Trigger it via the application's [`shutdown_handle()`](/docs/deployment/production#graceful-shutdown) — the framework installs no signal handlers of its own.
